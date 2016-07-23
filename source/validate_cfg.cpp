@@ -458,6 +458,7 @@ spv_result_t PerformCfgChecks(ValidationState_t& _) {
 
     // Check if the order of blocks in the binary appear before the blocks they
     // dominate
+#if 0
     auto& blocks = function.ordered_blocks();
     if (blocks.empty() == false) {
       for (auto block = begin(blocks) + 1; block != end(blocks); ++block) {
@@ -472,6 +473,7 @@ spv_result_t PerformCfgChecks(ValidationState_t& _) {
         }
       }
     }
+#endif
 
     /// Structured control flow checks are only required for shader capabilities
     if (_.has_capability(SpvCapabilityShader)) {
