@@ -56,6 +56,9 @@ Options:
   --raw-id        Show raw Id values instead of friendly names.
 
   --offsets       Show byte offsets for each instruction.
+
+  --debug-asm     Print more human-friendly assembly for debugging purposes.
+                  NOT intended for reassembling a SPIR-V binary.
 )",
       argv0, argv0);
 }
@@ -79,6 +82,7 @@ int main(int argc, char** argv) {
   bool show_byte_offsets = false;
   bool no_header = false;
   bool friendly_names = true;
+  bool debug_asm = false;
 
   for (int argi = 1; argi < argc; ++argi) {
     if ('-' == argv[argi][0]) {
@@ -109,6 +113,9 @@ int main(int argc, char** argv) {
           } else if (0 == strcmp(argv[argi], "--no-header")) {
             no_header = true;
           } else if (0 == strcmp(argv[argi], "--raw-id")) {
+            friendly_names = false;
+          } else if (0 == strcmp(argv[argi], "--debug-asm")) {
+            debug_asm = true;
             friendly_names = false;
           } else if (0 == strcmp(argv[argi], "--help")) {
             print_usage(argv[0]);
@@ -155,6 +162,8 @@ int main(int argc, char** argv) {
   if (no_header) options |= SPV_BINARY_TO_TEXT_OPTION_NO_HEADER;
 
   if (friendly_names) options |= SPV_BINARY_TO_TEXT_OPTION_FRIENDLY_NAMES;
+
+  if (debug_asm) options |= SPV_BINARY_TO_TEXT_OPTION_DEBUG_ASM;
 
   if (!outFile || (0 == strcmp("-", outFile))) {
     // Print to standard output.

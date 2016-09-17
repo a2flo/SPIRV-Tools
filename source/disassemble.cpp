@@ -45,13 +45,14 @@ namespace {
 class Disassembler {
  public:
   Disassembler(const spvtools::AssemblyGrammar& grammar, uint32_t options,
-               spvtools::NameMapper name_mapper)
+               spvtools::NameMapper name_mapper, uint32_t extend_indent)
       : grammar_(grammar),
         print_(spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_PRINT, options)),
         color_(spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_COLOR, options)),
+        debug_asm_(spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_DEBUG_ASM, options)),
         indent_(spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_INDENT, options)
-                    ? kStandardIndent
-                    : 0),
+                (extend_indent > kStandardIndent ?
+                 extend_indent : kStandardIndent) : 0),
         text_(),
         out_(print_ ? out_stream() : out_stream(text_)),
         stream_(out_.get()),
@@ -115,6 +116,8 @@ class Disassembler {
   const spvtools::AssemblyGrammar& grammar_;
   const bool print_;  // Should we also print to the standard output stream?
   const bool color_;  // Should we print in colour?
+  const bool debug_asm_; // Are we printing debug asm?
+  bool first_label_in_function_ { false }; // used with debug asm
   const int indent_;  // How much to indent. 0 means don't indent
   spv_endianness_t endian_;  // The detected endianness of the binary.
   std::stringstream text_;   // Captures the text, if not printing.
@@ -158,8 +161,65 @@ spv_result_t Disassembler::HandleHeader(spv_endianness_t endian,
 
 spv_result_t Disassembler::HandleInstruction(
     const spv_parsed_instruction_t& inst) {
+  // TODO: put all of the debug asm stuff into a separate debug-asm function
+  if (debug_asm_) {
+    // ignore all Op*Name instructions if we're already using debug asm with
+    // friendly names as this would lead to a lot of unhelpful noise
+    if (inst.opcode == SpvOp::SpvOpName ||
+        inst.opcode == SpvOp::SpvOpMemberName) {
+      return SPV_SUCCESS;
+    }
+
+    if (inst.opcode == SpvOp::SpvOpFunction) {
+      stream_ << "\n";
+      // TODO: exec mode
+      stream_ << "function ";
+      // return type
+      stream_ << name_mapper_(inst.type_id) << " ";
+      // function name
+      stream_ << name_mapper_(inst.result_id) << " ( ";
+      
+      // params
+      // TODO: better I/O and params?
+      EmitOperand(inst, 3);
+      stream_ << " ) ";
+      
+      // control (skip if None)
+      if (inst.words[3] != 0) {
+        EmitOperand(inst, 2);
+        stream_ << " ";
+      }
+      stream_ << "{\n";
+      
+      // signal the next label that it's the first in this function
+      first_label_in_function_ = true;
+      return SPV_SUCCESS;
+    }
+    if (inst.opcode == SpvOp::SpvOpFunctionEnd) {
+      stream_ << "}\n";
+      return SPV_SUCCESS;
+    }
+    if (inst.opcode == SpvOp::SpvOpLabel) {
+      // only print a newline if this isn't the first label in a function
+      if (!first_label_in_function_) {
+        stream_ << "\n";
+      } else {
+        first_label_in_function_ = false;
+      }
+      if (inst.result_id) {
+        stream_ << name_mapper_(inst.result_id) << ":\n";
+        // TODO: print predecessors
+        return SPV_SUCCESS;
+      }
+    }
+  }
+
   if (inst.result_id) {
-    SetBlue();
+    // blue text is hard to read on black/transparent backgrounds, use red
+    // instead, which should work well on both black and white backgrounds
+    if (!debug_asm_) SetBlue();
+    else SetRed();
+
     const std::string id_name = name_mapper_(inst.result_id);
     if (indent_)
       stream_ << std::setw(std::max(0, indent_ - 3 - int(id_name.size())));
@@ -170,14 +230,36 @@ spv_result_t Disassembler::HandleInstruction(
     stream_ << std::string(indent_, ' ');
   }
 
-  stream_ << "Op" << spvOpcodeString(static_cast<SpvOp>(inst.opcode));
+  // we know opcodes are opcodes, skip the "Op" for more human-readable names
+  if (!debug_asm_) stream_ << "Op";
+  stream_ << spvOpcodeString(static_cast<SpvOp>(inst.opcode));
 
-  for (uint16_t i = 0; i < inst.num_operands; i++) {
-    const spv_operand_type_t type = inst.operands[i].type;
-    assert(type != SPV_OPERAND_TYPE_NONE);
-    if (type == SPV_OPERAND_TYPE_RESULT_ID) continue;
+  if (debug_asm_ && inst.opcode == SpvOp::SpvOpPhi) {
     stream_ << " ";
-    EmitOperand(inst, i);
+    EmitOperand(inst, 0);
+    stream_ << " (";
+    for (uint16_t i = 1; i < inst.num_operands; i++) {
+      const spv_operand_type_t type = inst.operands[i].type;
+      assert(type != SPV_OPERAND_TYPE_NONE);
+      if (type == SPV_OPERAND_TYPE_RESULT_ID) continue;
+
+      stream_ << " ";
+      EmitOperand(inst, i);
+      stream_ << " <- ";
+      EmitOperand(inst, ++i);
+
+      if (i + 1 < inst.num_operands)
+        stream_ << ",";
+    }
+    stream_ << " )";
+  } else {
+    for (uint16_t i = 0; i < inst.num_operands; i++) {
+      const spv_operand_type_t type = inst.operands[i].type;
+      assert(type != SPV_OPERAND_TYPE_NONE);
+      if (type == SPV_OPERAND_TYPE_RESULT_ID) continue;
+      stream_ << " ";
+      EmitOperand(inst, i);
+    }
   }
 
   if (show_byte_offset_) {
@@ -418,15 +500,24 @@ spv_result_t spvBinaryToText(const spv_const_context context,
 
   // Generate friendly names for Ids if requested.
   std::unique_ptr<spvtools::FriendlyNameMapper> friendly_mapper;
+  std::unique_ptr<spvtools::DebugNameMapper> debug_mapper;
   spvtools::NameMapper name_mapper = spvtools::GetTrivialNameMapper();
+  uint32_t extend_indent = 0;
   if (options & SPV_BINARY_TO_TEXT_OPTION_FRIENDLY_NAMES) {
     friendly_mapper = spvtools::MakeUnique<spvtools::FriendlyNameMapper>(
         &hijack_context, code, wordCount);
     name_mapper = friendly_mapper->GetNameMapper();
+  } else if (options & SPV_BINARY_TO_TEXT_OPTION_DEBUG_ASM) {
+    debug_mapper.reset(
+        new libspirv::DebugNameMapper(&hijack_context, code, wordCount));
+    name_mapper = debug_mapper->GetNameMapper();
+
+    // always add 4, because of '%' and " = "
+    extend_indent = debug_mapper->GetMaxNameLength() + 4;
   }
 
   // Now disassemble!
-  Disassembler disassembler(grammar, options, name_mapper);
+  Disassembler disassembler(grammar, options, name_mapper, extend_indent);
   if (auto error = spvBinaryParse(&hijack_context, &disassembler, code,
                                   wordCount, DisassembleHeader,
                                   DisassembleInstruction, pDiagnostic)) {
