@@ -65,7 +65,7 @@ class FriendlyNameMapper {
   // defined Id in the specified module.  The module is specified by the code
   // wordCount, and should be parseable in the specified context.
   FriendlyNameMapper(const spv_const_context context, const uint32_t* code,
-                     const size_t wordCount);
+                     const size_t wordCount, const bool runParser = true);
 
   // Returns a NameMapper which maps ids to the friendly names parsed from the
   // module provided to the constructor.
@@ -78,16 +78,23 @@ class FriendlyNameMapper {
   // NameMapper.
   std::string NameForId(uint32_t id);
 
- private:
+ protected:
   // Transforms the given string so that it is acceptable as an Id name in
   // assembly language.  Two distinct inputs can map to the same output.
   std::string Sanitize(const std::string& suggested_name);
+
+  // All characters that Sanitize() considers to be valid.
+  std::string valid_chars_ {
+    "abcdefghijklmnopqrstuvwxyz"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "_0123456789"
+  };
 
   // Records a name for the given id.  If this id already has a name, then
   // this is a no-op.  If the id doesn't have a name, use the given
   // suggested_name if it hasn't already been taken, and otherwise generate
   // a new (unused) name based on the suggested name.
-  void SaveName(uint32_t id, const std::string& suggested_name);
+  virtual void SaveName(uint32_t id, const std::string& suggested_name);
 
   // Records a built-in variable name for target_id.  If target_id already
   // has a name then this is a no-op.
@@ -115,6 +122,31 @@ class FriendlyNameMapper {
   std::unordered_set<std::string> used_names_;
   // The assembly grammar for the current context.
   const AssemblyGrammar grammar_;
+};
+
+class DebugNameMapper : public FriendlyNameMapper {
+ public:
+  DebugNameMapper(const spv_const_context context, const uint32_t* code,
+                  const size_t wordCount);
+
+  // Returns the maximum name length in the module.
+  uint32_t GetMaxNameLength() const {
+    return max_name_length_;
+  }
+
+ protected:
+  // The maximum name length in the module.
+  uint32_t max_name_length_ { 0 };
+
+  void SaveName(uint32_t id, const std::string& suggested_name) override;
+
+  spv_result_t ParseInstruction(const spv_parsed_instruction_t& inst);
+
+  static spv_result_t DebugParseInstructionForwarder(
+      void* user_data, const spv_parsed_instruction_t* parsed_instruction) {
+    return reinterpret_cast<DebugNameMapper*>(user_data)->ParseInstruction(
+        *parsed_instruction);
+  }
 };
 
 }  // namespace spvtools

@@ -328,6 +328,7 @@ typedef enum spv_binary_to_text_options_t {
   SPV_BINARY_TO_TEXT_OPTION_FRIENDLY_NAMES = SPV_BIT(6),
   // Add some comments to the generated assembly
   SPV_BINARY_TO_TEXT_OPTION_COMMENT = SPV_BIT(7),
+  SPV_BINARY_TO_TEXT_OPTION_DEBUG_ASM = SPV_BIT(30),
   SPV_FORCE_32_BIT_ENUM(spv_binary_to_text_options_t)
 } spv_binary_to_text_options_t;
 
