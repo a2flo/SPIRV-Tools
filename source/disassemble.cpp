@@ -24,6 +24,7 @@
 #include <memory>
 #include <unordered_map>
 #include <utility>
+#include <fstream>
 
 #include "source/assembly_grammar.h"
 #include "source/binary.h"
@@ -38,7 +39,6 @@
 #include "source/spirv_endian.h"
 #include "source/util/hex_float.h"
 #include "source/util/make_unique.h"
-#include "spirv-tools/libspirv.h"
 
 namespace {
 
@@ -120,7 +120,6 @@ class Disassembler {
   const bool print_;  // Should we also print to the standard output stream?
   const bool color_;  // Should we print in colour?
   const bool debug_asm_; // Are we printing debug asm?
-  bool first_label_in_function_ { false }; // used with debug asm
   const int indent_;  // How much to indent. 0 means don't indent
   const int comment_;        // Should we comment the source
   spv_endianness_t endian_;  // The detected endianness of the binary.
@@ -134,7 +133,152 @@ class Disassembler {
   bool inserted_decoration_space_ = false;
   bool inserted_debug_space_ = false;
   bool inserted_type_space_ = false;
+
+  // debug asm stuff - TODO: move to a separate class
+  bool first_label_in_function_{false};
+  struct dbg_line {
+    uint32_t file_id{0};
+    uint32_t line{0};
+    uint32_t column{0};
+    void set(const uint32_t &file_id_, const uint32_t &line_,
+             const uint32_t &column_) {
+      file_id = file_id_;
+      line = line_;
+      column = column_;
+    }
+    void reset() {
+      file_id = 0;
+      line = 0;
+      column = 0;
+    }
+  };
+  dbg_line last_dbg_line;
+  struct source_file {
+    std::string file_name{""};
+
+    void print_line(std::ostream &stream, const uint32_t &line,
+                    const uint32_t &column);
+
+  private:
+    bool valid{false};
+    bool processed{false};
+    std::string source{""};
+    std::vector<uint32_t> lines;
+    void load_and_map_source();
+  };
+  std::unordered_map<uint32_t, source_file> source_files;
 };
+
+
+void Disassembler::source_file::print_line(std::ostream &stream,
+                                           const uint32_t &line,
+                                           const uint32_t &column) {
+  if (!processed) {
+    load_and_map_source();
+  }
+  if (!valid)
+    return;
+
+  // TODO: color flag test
+  stream << libspirv::clr::green();
+
+  // file
+  stream << "; " << file_name << ":" << line << ":" << column << ":\n";
+
+  // source line
+  stream << "; ";
+  size_t tab_count = 0;
+  if (line >= lines.size() && line == 0) {
+    stream << "INVALID LINE NUMBER";
+  } else {
+    const auto line_start = lines[line - 1] + 1, line_end = lines[line];
+    const auto line_str = source.substr(line_start, line_end - line_start);
+    if (column > 0) {
+      tab_count =
+          std::count(line_str.cbegin(), line_str.cbegin() + column - 1, '\t');
+    }
+    stream << line_str;
+  }
+  stream << "\n";
+
+  // column
+  if (column > 0) {
+    std::string column_tabs(tab_count, '\t');
+    std::string column_space(column - 1 - tab_count, ' ');
+    stream << "; " << column_tabs << column_space;
+    stream << libspirv::clr::red();
+    stream << "^\n";
+  }
+
+  stream << libspirv::clr::reset();
+}
+
+void Disassembler::source_file::load_and_map_source() {
+  processed = true;
+
+  // load file
+  {
+    std::ifstream filestream;
+
+    // don't throw exceptions
+    filestream.exceptions(std::fstream::goodbit);
+
+    filestream.open(file_name, std::fstream::in | std::fstream::binary);
+    if (!filestream.is_open()) {
+      return;
+    }
+
+    // get the file size
+    const auto cur_position = filestream.tellg();
+    filestream.seekg(0, std::ios::end);
+    const auto file_size = filestream.tellg();
+    filestream.seekg(0, std::ios::beg);
+    filestream.seekg(cur_position, std::ios::beg);
+
+    source.resize(file_size);
+    if (source.size() != (size_t)file_size) {
+      return;
+    }
+
+    filestream.read(&source[0], (std::streamsize)file_size);
+    const auto read_size = filestream.gcount();
+    if (read_size != (decltype(read_size))file_size) {
+      return;
+    }
+  }
+
+  // map source
+  // -> we will only need to remove \r characters here (replace \r\n by \n and
+  // replace single \r chars by \n)
+  lines.emplace_back(0); // line #1 start
+  for (auto begin_iter = source.begin(), end_iter = source.end(),
+            iter = begin_iter;
+       iter != end_iter; ++iter) {
+    if (*iter == '\n' || *iter == '\r') {
+      if (*iter == '\r') {
+        auto next_iter = iter + 1;
+        if (next_iter != end_iter && *next_iter == '\n') {
+          // replace \r\n with single \n (erase \r)
+          iter = source.erase(iter); // iter now at '\n'
+          // we now have a new end and begin iter
+          end_iter = source.end();
+          begin_iter = source.begin();
+        } else {
+          // single \r -> \n replace
+          *iter = '\n';
+        }
+      }
+      // else: \n
+
+      // add newline position
+      lines.emplace_back(std::distance(begin_iter, iter));
+    }
+  }
+  // also insert the "<eof> newline"
+  lines.emplace_back(source.size());
+
+  valid = true;
+}
 
 spv_result_t Disassembler::HandleHeader(spv_endianness_t endian,
                                         uint32_t version, uint32_t generator,
@@ -200,6 +344,29 @@ spv_result_t Disassembler::HandleInstruction(
       return SPV_SUCCESS;
     }
 
+    if (inst.opcode == SpvOp::SpvOpString) {
+      // NOTE: files will be lazily loaded on first use (we also don't know yet
+      // if this OpString actually is a file name)
+      source_file sf;
+      sf.file_name =
+          reinterpret_cast<const char *>(inst.words + inst.operands[1].offset);
+      source_files.emplace(inst.result_id, sf);
+    }
+
+    if (inst.opcode == SpvOp::SpvOpLine) {
+      const auto file_id = inst.words[1];
+      const auto file_iter = source_files.find(file_id);
+      if (file_iter != source_files.end()) {
+        if (last_dbg_line.file_id != file_id ||
+            last_dbg_line.line != inst.words[2] ||
+            last_dbg_line.column != inst.words[3]) {
+          last_dbg_line.set(file_id, inst.words[2], inst.words[3]);
+          file_iter->second.print_line(stream_, inst.words[2], inst.words[3]);
+        }
+        return SPV_SUCCESS;
+      }
+    }
+
     if (inst.opcode == SpvOp::SpvOpFunction) {
       stream_ << "\n";
       // TODO: exec mode
@@ -230,6 +397,8 @@ spv_result_t Disassembler::HandleInstruction(
       return SPV_SUCCESS;
     }
     if (inst.opcode == SpvOp::SpvOpLabel) {
+      last_dbg_line.reset();
+
       // only print a newline if this isn't the first label in a function
       if (!first_label_in_function_) {
         stream_ << "\n";
