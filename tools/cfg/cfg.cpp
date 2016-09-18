@@ -21,6 +21,7 @@
 #include "spirv-tools/libspirv.h"
 #include "tools/cfg/bin_to_dot.h"
 #include "tools/io.h"
+#include "source/spirv_container.h"
 
 // Prints a program usage message to stdout.
 static void print_usage(const char* argv0) {
@@ -105,23 +106,37 @@ int main(int argc, char** argv) {
   // Read the input binary.
   std::vector<uint32_t> contents;
   if (!ReadFile<uint32_t>(inFile, "rb", &contents)) return 1;
-  spv_context context = spvContextCreate(kDefaultEnvironment);
-  spv_diagnostic diagnostic = nullptr;
 
-  std::stringstream ss;
-  auto error =
-      BinaryToDot(context, contents.data(), contents.size(), &ss, &diagnostic);
-  if (error) {
-    spvDiagnosticPrint(diagnostic);
+  spirv_container container { std::move(contents) };
+  if (!container.is_valid()) {
+    // neither a valid SPIR-V file, nor a valid container
+    return 1;
+  }
+
+  uint32_t mod_idx = 0;
+  for (const auto& module : container) {
+    spv_context context = spvContextCreate(kDefaultEnvironment);
+    spv_diagnostic diagnostic = nullptr;
+
+    std::stringstream ss;
+    auto error = BinaryToDot(context, module.data, module.size, &ss, &diagnostic);
+    if (error) {
+      spvDiagnosticPrint(diagnostic);
+      spvDiagnosticDestroy(diagnostic);
+      spvContextDestroy(context);
+      return error;
+    }
+    std::string str = ss.str();
+    if (outFile == nullptr || container.size() == 1) {
+      WriteFile(outFile, "w", str.data(), str.size());
+    } else {
+      std::string mod_file_name = std::to_string(mod_idx++) + "_" + outFile;
+      WriteFile(mod_file_name.c_str(), "w", str.data(), str.size());
+    }
+
     spvDiagnosticDestroy(diagnostic);
     spvContextDestroy(context);
-    return error;
   }
-  std::string str = ss.str();
-  WriteFile(outFile, "w", str.data(), str.size());
-
-  spvDiagnosticDestroy(diagnostic);
-  spvContextDestroy(context);
 
   return 0;
 }
