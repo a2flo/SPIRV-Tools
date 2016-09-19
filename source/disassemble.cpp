@@ -172,12 +172,11 @@ class Disassembler {
 
 void Disassembler::source_file::print_line(std::ostream &stream,
                                            const uint32_t &line,
-                                           const uint32_t &column) {
-  if (!processed) {
-    load_and_map_source();
-  }
-  if (!valid)
-    return;
+                                           const uint32_t &column_) {
+  if (!processed) load_and_map_source();
+  if (!valid) return;
+  if (line == 0) return;
+  uint32_t column = column_;
 
   // TODO: color flag test
   stream << libspirv::clr::green();
@@ -188,12 +187,16 @@ void Disassembler::source_file::print_line(std::ostream &stream,
   // source line
   stream << "; ";
   size_t tab_count = 0;
-  if (line >= lines.size() && line == 0) {
+  if (line >= lines.size()) {
     stream << "INVALID LINE NUMBER";
   } else {
     const auto line_start = lines[line - 1] + 1, line_end = lines[line];
-    const auto line_str = source.substr(line_start, line_end - line_start);
-    if (column > 0) {
+    const auto line_length = line_end - line_start;
+    const auto line_str = source.substr(line_start, line_length);
+    if (column > line_length) {
+      // invalid column
+      column = 0;
+    } else if (column > 0) {
       tab_count =
           std::count(line_str.cbegin(), line_str.cbegin() + column - 1, '\t');
     }
