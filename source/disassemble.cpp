@@ -79,7 +79,7 @@ class Disassembler {
   spv_result_t SaveTextResult(spv_text* text_result) const;
 
  private:
-  enum { kStandardIndent = 15 };
+  enum : uint32_t { kStandardIndent = 15 };
 
   using out_stream = spvtools::out_stream;
 
