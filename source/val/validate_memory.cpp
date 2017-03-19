@@ -1381,7 +1381,8 @@ spv_result_t ValidateAccessChain(ValidationState_t& _,
         return _.diag(SPV_ERROR_INVALID_ID, cur_word_instr)
                << instr_name
                << " reached non-composite type while indexes "
-                  "still remain to be traversed.";
+                  "still remain to be traversed.\n"
+               << "  " << _.Disassemble(*inst);
       }
     }
   }

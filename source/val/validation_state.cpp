@@ -1356,7 +1356,7 @@ std::string ValidationState_t::Disassemble(const Instruction& inst) const {
 std::string ValidationState_t::Disassemble(const uint32_t* words,
                                            uint16_t num_words) const {
   uint32_t disassembly_options = SPV_BINARY_TO_TEXT_OPTION_NO_HEADER |
-                                 SPV_BINARY_TO_TEXT_OPTION_FRIENDLY_NAMES;
+                                 SPV_BINARY_TO_TEXT_OPTION_DEBUG_ASM;
 
   return spvInstructionBinaryToText(context()->target_env, words, num_words,
                                     words_, num_words_, disassembly_options);

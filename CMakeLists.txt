@@ -41,7 +41,9 @@ if("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
   set(SPIRV_TIMER_ENABLED ${SPIRV_ALLOW_TIMERS})
 elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Emscripten")
     add_definitions(-DSPIRV_EMSCRIPTEN)
-elseif("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "FreeBSD")
+  add_definitions(-DSPIRV_LINUX)
+elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
   add_definitions(-DSPIRV_WINDOWS)
 elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "CYGWIN")
   add_definitions(-DSPIRV_WINDOWS)
@@ -247,7 +249,9 @@ if(NOT COMMAND find_host_program)
 endif()
 
 # Tests require Python3
-find_host_package(PythonInterp 3 REQUIRED)
+if (NOT "${SPIRV_SKIP_TESTS}")
+  find_host_package(PythonInterp 3 REQUIRED)
+endif()
 
 # Check for symbol exports on Linux.
 # At the moment, this check will fail on the OSX build machines for the Android NDK.
