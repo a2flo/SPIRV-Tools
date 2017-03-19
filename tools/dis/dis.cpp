@@ -24,6 +24,7 @@
 
 #include "spirv-tools/libspirv.h"
 #include "tools/io.h"
+#include "source/spirv_container.h"
 
 static void print_usage(char* argv0) {
   printf(
@@ -58,6 +59,9 @@ Options:
   --offsets       Show byte offsets for each instruction.
 
   --comment       Add comments to make reading easier
+
+  --debug-asm     Print more human-friendly assembly for debugging purposes.
+                  NOT intended for reassembling a SPIR-V binary.
 )",
       argv0, argv0);
 }
@@ -82,6 +86,7 @@ int main(int argc, char** argv) {
   bool no_header = false;
   bool friendly_names = true;
   bool comments = false;
+  bool debug_asm = false;
 
   for (int argi = 1; argi < argc; ++argi) {
     if ('-' == argv[argi][0]) {
@@ -114,6 +119,9 @@ int main(int argc, char** argv) {
           } else if (0 == strcmp(argv[argi], "--no-header")) {
             no_header = true;
           } else if (0 == strcmp(argv[argi], "--raw-id")) {
+            friendly_names = false;
+          } else if (0 == strcmp(argv[argi], "--debug-asm")) {
+            debug_asm = true;
             friendly_names = false;
           } else if (0 == strcmp(argv[argi], "--help")) {
             print_usage(argv[0]);
@@ -163,6 +171,8 @@ int main(int argc, char** argv) {
 
   if (comments) options |= SPV_BINARY_TO_TEXT_OPTION_COMMENT;
 
+  if (debug_asm) options |= SPV_BINARY_TO_TEXT_OPTION_DEBUG_ASM;
+
   if (!outFile || (0 == strcmp("-", outFile))) {
     // Print to standard output.
     options |= SPV_BINARY_TO_TEXT_OPTION_PRINT;
@@ -181,6 +191,11 @@ int main(int argc, char** argv) {
   // Read the input binary.
   std::vector<uint32_t> contents;
   if (!ReadBinaryFile<uint32_t>(inFile, &contents)) return 1;
+  spirv_container container { std::move(contents) };
+  if (!container.is_valid()) {
+    // neither a valid SPIR-V file, nor a valid container
+    return 1;
+  }
 
   // If printing to standard output, then spvBinaryToText should
   // do the printing.  In particular, colour printing on Windows is
@@ -193,24 +208,27 @@ int main(int argc, char** argv) {
   spv_text text = nullptr;
   spv_text* textOrNull = print_to_stdout ? nullptr : &text;
   spv_diagnostic diagnostic = nullptr;
-  spv_context context = spvContextCreate(kDefaultEnvironment);
-  spv_result_t error =
-      spvBinaryToText(context, contents.data(), contents.size(), options,
-                      textOrNull, &diagnostic);
-  spvContextDestroy(context);
-  if (error) {
-    spvDiagnosticPrint(diagnostic);
-    spvDiagnosticDestroy(diagnostic);
-    return error;
-  }
 
-  if (!print_to_stdout) {
-    if (!WriteFile<char>(outFile, "w", text->str, text->length)) {
-      spvTextDestroy(text);
-      return 1;
+  for (const auto& module : container) {
+    spv_context context = spvContextCreate(kDefaultEnvironment);
+    spv_result_t error =
+        spvBinaryToText(context, module.data, module.size, options,
+                        textOrNull, &diagnostic);
+    spvContextDestroy(context);
+    if (error) {
+      spvDiagnosticPrint(diagnostic);
+      spvDiagnosticDestroy(diagnostic);
+      return error;
     }
+
+    if (!print_to_stdout) {
+      if (!WriteFile<char>(outFile, "w", text->str, text->length)) {
+        spvTextDestroy(text);
+        return 1;
+      }
+    }
+    spvTextDestroy(text);
   }
-  spvTextDestroy(text);
 
   return 0;
 }
