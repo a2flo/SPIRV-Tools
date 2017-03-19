@@ -61,6 +61,7 @@ std::string fixPathForLLVM(std::string input) {
 bool OutputSourceFiles(
     const std::unordered_map<std::string, std::string>& sources,
     const std::string& outdirPath, bool overwrite) {
+#if !defined(__APPLE__) // requires targeting macOS 10.15+ (which we don't want yet)
   std::filesystem::path outdir(fixPathForLLVM(outdirPath));
   if (!std::filesystem::is_directory(outdir)) {
     if (!std::filesystem::create_directories(outdir)) {
@@ -94,6 +95,12 @@ bool OutputSourceFiles(
     }
   }
   return true;
+#else
+  (void)sources;
+  (void)outdirPath;
+  (void)overwrite;
+  return false;
+#endif
 }
 
 }  // namespace
@@ -162,11 +169,13 @@ int main(int, const char** argv) {
       return 0;
     }
 
+#if !defined(__APPLE__) // requires targeting macOS 10.15+ (which we don't want yet)
     const std::filesystem::path outdirPath(flags::outdir.value());
     if (!OutputSourceFiles(sourceCode, outdirPath.string(),
                            flags::force.value())) {
       return 1;
-    }
+	}
+#endif
   }
 
   // FIXME: implement logic.

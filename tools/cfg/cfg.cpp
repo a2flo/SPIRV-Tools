@@ -22,6 +22,7 @@
 #include "tools/cfg/bin_to_dot.h"
 #include "tools/io.h"
 #include "tools/util/flags.h"
+#include "source/spirv_container.h"
 
 static const auto kDefaultEnvironment = SPV_ENV_UNIVERSAL_1_6;
 static const std::string kHelpText =
@@ -76,24 +77,37 @@ int main(int, const char** argv) {
   // Read the input binary.
   std::vector<uint32_t> contents;
   if (!ReadBinaryFile<uint32_t>(inFile.c_str(), &contents)) return 1;
-  spv_context context = spvContextCreate(kDefaultEnvironment);
-  spv_diagnostic diagnostic = nullptr;
 
-  std::stringstream ss;
-  auto error =
-      BinaryToDot(context, contents.data(), contents.size(), &ss, &diagnostic);
-  if (error) {
-    spvDiagnosticPrint(diagnostic);
-    spvDiagnosticDestroy(diagnostic);
-    spvContextDestroy(context);
-    return error;
+  spirv_container container { std::move(contents) };
+  if (!container.is_valid()) {
+    // neither a valid SPIR-V file, nor a valid container
+    return 1;
   }
-  std::string str = ss.str();
-  WriteFile(outFile.empty() ? nullptr : outFile.c_str(), "w", str.data(),
-            str.size());
 
-  spvDiagnosticDestroy(diagnostic);
-  spvContextDestroy(context);
+  uint32_t mod_idx = 0;
+  for (const auto& module : container) {
+    spv_context ctx = spvContextCreate(kDefaultEnvironment);
+    spv_diagnostic diag = nullptr;
+
+    std::stringstream ss;
+    auto error = BinaryToDot(ctx, module.data, module.size, &ss, &diag);
+    if (error) {
+      spvDiagnosticPrint(diag);
+      spvDiagnosticDestroy(diag);
+      spvContextDestroy(ctx);
+      return error;
+    }
+    std::string str = ss.str();
+    if (outFile.empty() || container.size() == 1) {
+      WriteFile(outFile.empty() ? nullptr : outFile.c_str(), "w", str.data(), str.size());
+    } else {
+      std::string mod_file_name = std::to_string(mod_idx++) + "_" + outFile;
+      WriteFile(mod_file_name.c_str(), "w", str.data(), str.size());
+    }
+
+    spvDiagnosticDestroy(diag);
+    spvContextDestroy(ctx);
+  }
 
   return 0;
 }

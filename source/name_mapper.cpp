@@ -45,8 +45,11 @@ NameMapper GetTrivialNameMapper() { return to_string; }
 
 FriendlyNameMapper::FriendlyNameMapper(const spv_const_context context,
                                        const uint32_t* code,
-                                       const size_t wordCount)
+                                       const size_t wordCount,
+                                       const bool runParser)
     : grammar_(AssemblyGrammar(context)) {
+  if (!runParser) return;
+
   spv_diagnostic diag = nullptr;
   // We don't care if the parse fails.
   spvBinaryParse(context, this, code, wordCount, nullptr,
@@ -69,13 +72,9 @@ std::string FriendlyNameMapper::Sanitize(const std::string& suggested_name) {
   if (suggested_name.empty()) return "_";
   // Otherwise, replace invalid characters by '_'.
   std::string result;
-  std::string valid =
-      "abcdefghijklmnopqrstuvwxyz"
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-      "_0123456789";
   std::transform(suggested_name.begin(), suggested_name.end(),
-                 std::back_inserter(result), [&valid](const char c) {
-                   return (std::string::npos == valid.find(c)) ? '_' : c;
+                 std::back_inserter(result), [this](const char c) {
+                   return (std::string::npos == valid_chars_.find(c)) ? '_' : c;
                  });
   return result;
 }
@@ -101,11 +100,11 @@ void FriendlyNameMapper::SaveBuiltInName(uint32_t target_id,
                                          uint32_t built_in) {
 #define GLCASE(name)                  \
   case spv::BuiltIn::name:            \
-    SaveName(target_id, "gl_" #name); \
+    SaveName(target_id, #name);       \
     return;
 #define GLCASE2(name, suggested)           \
   case spv::BuiltIn::name:                 \
-    SaveName(target_id, "gl_" #suggested); \
+    SaveName(target_id, #suggested);       \
     return;
 #define CASE(name)              \
   case spv::BuiltIn::name:      \
@@ -120,26 +119,26 @@ void FriendlyNameMapper::SaveBuiltInName(uint32_t target_id,
     GLCASE2(InstanceId, InstanceID)
     GLCASE2(PrimitiveId, PrimitiveID)
     GLCASE2(InvocationId, InvocationID)
-    GLCASE(Layer)
-    GLCASE(ViewportIndex)
-    GLCASE(TessLevelOuter)
-    GLCASE(TessLevelInner)
-    GLCASE(TessCoord)
-    GLCASE(PatchVertices)
-    GLCASE(FragCoord)
-    GLCASE(PointCoord)
-    GLCASE(FrontFacing)
+    CASE(Layer)
+    CASE(ViewportIndex)
+    CASE(TessLevelOuter)
+    CASE(TessLevelInner)
+    CASE(TessCoord)
+    CASE(PatchVertices)
+    CASE(FragCoord)
+    CASE(PointCoord)
+    CASE(FrontFacing)
     GLCASE2(SampleId, SampleID)
-    GLCASE(SamplePosition)
-    GLCASE(SampleMask)
-    GLCASE(FragDepth)
-    GLCASE(HelperInvocation)
+    CASE(SamplePosition)
+    CASE(SampleMask)
+    CASE(FragDepth)
+    CASE(HelperInvocation)
     GLCASE2(NumWorkgroups, NumWorkGroups)
     GLCASE2(WorkgroupSize, WorkGroupSize)
     GLCASE2(WorkgroupId, WorkGroupID)
     GLCASE2(LocalInvocationId, LocalInvocationID)
     GLCASE2(GlobalInvocationId, GlobalInvocationID)
-    GLCASE(LocalInvocationIndex)
+    CASE(LocalInvocationIndex)
     CASE(WorkDim)
     CASE(GlobalSize)
     CASE(EnqueuedWorkgroupSize)
@@ -151,9 +150,9 @@ void FriendlyNameMapper::SaveBuiltInName(uint32_t target_id,
     CASE(NumEnqueuedSubgroups)
     CASE(SubgroupId)
     CASE(SubgroupLocalInvocationId)
-    GLCASE(VertexIndex)
-    GLCASE(InstanceIndex)
-    GLCASE(BaseInstance)
+    CASE(VertexIndex)
+    CASE(InstanceIndex)
+    CASE(BaseInstance)
     CASE(SubgroupEqMaskKHR)
     CASE(SubgroupGeMaskKHR)
     CASE(SubgroupGtMaskKHR)
