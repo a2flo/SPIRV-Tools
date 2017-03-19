@@ -1406,20 +1406,21 @@ spv_result_t ValidateAccessChain(ValidationState_t& _,
         return _.diag(SPV_ERROR_INVALID_ID, inst)
                << instr_name
                << " reached non-composite type while indexes "
-                  "still remain to be traversed.";
+                  "still remain to be traversed.\n"
+               << "  " << _.Disassemble(*inst);
       }
     }
   }
   // At this point, we have fully walked down from the base using the indices.
   // The type being pointed to should be the same as the result type.
   if (type_pointee->id() != result_type_pointee->id()) {
-    return _.diag(SPV_ERROR_INVALID_ID, inst)
-           << instr_name << " result type (Op"
+    return _.diag(SPV_ERROR_INVALID_ID, { inst, result_type_pointee, type_pointee })
+           << instr_name << " result type (" << result_type_pointee->id() << ": Op"
            << spvOpcodeString(
                   static_cast<spv::Op>(result_type_pointee->opcode()))
            << ") does not match the type that results from indexing into the "
               "base "
-              "<id> (Op"
+              "<id> (" << type_pointee->id() << ": Op"
            << spvOpcodeString(static_cast<spv::Op>(type_pointee->opcode()))
            << ").";
   }

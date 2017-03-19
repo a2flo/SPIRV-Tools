@@ -25,6 +25,7 @@
 #include "spirv-tools/libspirv.h"
 #include "tools/io.h"
 #include "tools/util/flags.h"
+#include "source/spirv_container.h"
 
 static const std::string kHelpText = R"(%s - Disassemble a SPIR-V binary module
 
@@ -57,6 +58,9 @@ Options:
   --offsets       Show byte offsets for each instruction.
 
   --comment       Add comments to make reading easier
+
+  --debug-asm     Print more human-friendly assembly for debugging purposes.
+                  NOT intended for reassembling a SPIR-V binary.
 )";
 
 // clang-format off
@@ -71,6 +75,7 @@ FLAG_LONG_bool   (no_header, /* default_value= */ false, /* required= */ false);
 FLAG_LONG_bool   (raw_id,    /* default_value= */ false, /* required= */ false);
 FLAG_LONG_bool   (offsets,   /* default_value= */ false, /* required= */ false);
 FLAG_LONG_bool   (comment,   /* default_value= */ false, /* required= */ false);
+FLAG_LONG_bool   (debug_asm, /* default_value= */ false, /* required= */ false);
 // clang-format on
 
 static const auto kDefaultEnvironment = SPV_ENV_UNIVERSAL_1_5;
@@ -122,6 +127,11 @@ int main(int, const char** argv) {
 
   if (flags::comment.value()) options |= SPV_BINARY_TO_TEXT_OPTION_COMMENT;
 
+  if (flags::debug_asm.value()) {
+    options |= SPV_BINARY_TO_TEXT_OPTION_DEBUG_ASM;
+    options &= ~SPV_BINARY_TO_TEXT_OPTION_FRIENDLY_NAMES;
+  }
+
   if (flags::o.value() == "-") {
     // Print to standard output.
     options |= SPV_BINARY_TO_TEXT_OPTION_PRINT;
@@ -139,6 +149,11 @@ int main(int, const char** argv) {
   // Read the input binary.
   std::vector<uint32_t> contents;
   if (!ReadBinaryFile<uint32_t>(inFile.c_str(), &contents)) return 1;
+  spirv_container container { std::move(contents) };
+  if (!container.is_valid()) {
+    // neither a valid SPIR-V file, nor a valid container
+    return 1;
+  }
 
   // If printing to standard output, then spvBinaryToText should
   // do the printing.  In particular, colour printing on Windows is
@@ -151,24 +166,27 @@ int main(int, const char** argv) {
   spv_text text = nullptr;
   spv_text* textOrNull = print_to_stdout ? nullptr : &text;
   spv_diagnostic diagnostic = nullptr;
-  spv_context context = spvContextCreate(kDefaultEnvironment);
-  spv_result_t error =
-      spvBinaryToText(context, contents.data(), contents.size(), options,
-                      textOrNull, &diagnostic);
-  spvContextDestroy(context);
-  if (error) {
-    spvDiagnosticPrint(diagnostic);
-    spvDiagnosticDestroy(diagnostic);
-    return error;
-  }
 
-  if (!print_to_stdout) {
-    if (!WriteFile<char>(outFile.c_str(), "w", text->str, text->length)) {
-      spvTextDestroy(text);
-      return 1;
+  for (const auto& module : container) {
+    spv_context context = spvContextCreate(kDefaultEnvironment);
+    spv_result_t error =
+        spvBinaryToText(context, module.data, module.size, options,
+                        textOrNull, &diagnostic);
+    spvContextDestroy(context);
+    if (error) {
+      spvDiagnosticPrint(diagnostic);
+      spvDiagnosticDestroy(diagnostic);
+      return error;
     }
+
+    if (!print_to_stdout) {
+      if (!WriteFile<char>(outFile.c_str(), "w", text->str, text->length)) {
+        spvTextDestroy(text);
+        return 1;
+      }
+    }
+    spvTextDestroy(text);
   }
-  spvTextDestroy(text);
 
   return 0;
 }

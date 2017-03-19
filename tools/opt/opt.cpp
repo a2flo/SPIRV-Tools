@@ -24,6 +24,7 @@
 
 #include "source/opt/log.h"
 #include "source/spirv_target_env.h"
+#include "source/spirv_container.h"
 #include "source/util/string_utils.h"
 #include "spirv-tools/libspirv.hpp"
 #include "spirv-tools/optimizer.hpp"
@@ -863,19 +864,53 @@ int main(int argc, const char** argv) {
     return 1;
   }
 
-  std::vector<uint32_t> binary;
-  if (!ReadBinaryFile<uint32_t>(in_file, &binary)) {
+  std::vector<uint32_t> contents;
+  if (!ReadBinaryFile<uint32_t>(in_file, &contents)) {
+    return 1;
+  }
+  spirv_container container { std::move(contents) };
+  if (!container.is_valid()) {
+    // neither a valid SPIR-V file, nor a valid container
     return 1;
   }
 
-  // By using the same vector as input and output, we save time in the case
-  // that there was no change.
-  bool ok =
-      optimizer.Run(binary.data(), binary.size(), &binary, optimizer_options);
+  std::vector<std::vector<uint32_t>> optimized_bins;
+  std::vector<spirv_container::module> optimized_modules;
+  for (auto& module : container) {
+    std::vector<uint32_t> optimized_bin;
+    optimized_bin.reserve(module.size);
+    // abort immediately if opt failed
+    if (!optimizer.Run(module.data, module.size, &optimized_bin,
+                       optimizer_options)) {
+      return 1;
+    }
+    optimized_bins.emplace_back(std::move(optimized_bin));
 
-  if (!WriteFile<uint32_t>(out_file, "wb", binary.data(), binary.size())) {
+    // if container: create new (tmp) module
+    if (container.is_container()) {
+      spirv_container::module opt_mod(optimized_bins.back().data(),
+                                      optimized_bins.back().size());
+      opt_mod.functions = module.functions; // just copy old metadata
+      optimized_modules.emplace_back(opt_mod);
+    }
+  }
+  assert(!optimized_bins.empty());
+
+  if (!container.is_container()) {
+    // non-container: just write the binary
+    if (!WriteFile<uint32_t>(out_file, "wb", optimized_bins[0].data(),
+                             optimized_bins[0].size())) {
+      return 1;
+    }
+    return 0;
+  }
+
+  // container: rebuild
+  container.rebuild(optimized_modules);
+
+  if (!container.write(out_file)) {
     return 1;
   }
 
-  return ok ? 0 : 1;
+  return 0;
 }
