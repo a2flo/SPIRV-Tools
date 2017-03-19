@@ -40,13 +40,50 @@ std::string spvInstructionBinaryToText(const spv_target_env env,
 class AssemblyGrammar;
 namespace disassemble {
 
+// base class for various debug assembly printing
+struct debug_asm_base {
+  // debug asm stuff - TODO: move to a separate class
+  bool first_label_in_function_{false};
+  struct dbg_line {
+    uint32_t file_id{0};
+    uint32_t line{0};
+    uint32_t column{0};
+    void set(const uint32_t &file_id_, const uint32_t &line_,
+             const uint32_t &column_) {
+      file_id = file_id_;
+      line = line_;
+      column = column_;
+    }
+    void reset() {
+      file_id = 0;
+      line = 0;
+      column = 0;
+    }
+  };
+  dbg_line last_dbg_line;
+  struct source_file {
+  std::string file_name{""};
+
+  void print_line(std::ostream &stream, const uint32_t &line,
+                  const uint32_t &column);
+
+  private:
+    bool valid{false};
+    bool processed{false};
+    std::string source{""};
+    std::vector<uint32_t> lines;
+    void load_and_map_source();
+  };
+  std::unordered_map<uint32_t, source_file> source_files;
+};
+
 // Shared code with other tools (than the disassembler) that might need to
 // output disassembly. An InstructionDisassembler instance converts SPIR-V
 // binary for an instruction to its assembly representation.
-class InstructionDisassembler {
+class InstructionDisassembler : public debug_asm_base {
  public:
   InstructionDisassembler(const AssemblyGrammar& grammar, std::ostream& stream,
-                          uint32_t options, NameMapper name_mapper);
+                          uint32_t options, NameMapper name_mapper, uint32_t extend_indent);
 
   // Emits the assembly header for the module.
   void EmitHeaderSpirv();
@@ -108,6 +145,7 @@ class InstructionDisassembler {
   std::ostream& stream_;
   const bool print_;  // Should we also print to the standard output stream?
   const bool color_;  // Should we print in colour?
+  const bool debug_asm_; // Are we printing debug asm?
   const int indent_;  // How much to indent. 0 means don't indent
   const bool nested_indent_;     // Whether indentation should indicate nesting
   const int comment_;            // Should we comment the source

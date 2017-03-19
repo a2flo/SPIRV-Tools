@@ -399,6 +399,7 @@ typedef enum spv_binary_to_text_options_t {
   // Reorder blocks to match the structured control flow of SPIR-V to increase
   // readability.
   SPV_BINARY_TO_TEXT_OPTION_REORDER_BLOCKS = SPV_BIT(9),
+  SPV_BINARY_TO_TEXT_OPTION_DEBUG_ASM = SPV_BIT(30),
   SPV_FORCE_32_BIT_ENUM(spv_binary_to_text_options_t)
 } spv_binary_to_text_options_t;
 

@@ -30,6 +30,7 @@
 #include <stack>
 #include <unordered_map>
 #include <utility>
+#include <fstream>
 
 #include "source/assembly_grammar.h"
 #include "source/binary.h"
@@ -45,6 +46,122 @@
 #include "spirv-tools/libspirv.h"
 
 namespace spvtools {
+
+namespace disassemble {
+void debug_asm_base::source_file::print_line(std::ostream &stream,
+                                            const uint32_t &line,
+                                            const uint32_t &column_) {
+  if (!processed) load_and_map_source();
+  if (!valid) return;
+  if (line == 0) return;
+  uint32_t column = column_;
+
+  // TODO: color flag test
+  stream << spvtools::clr::green();
+
+  // file
+  stream << "; " << file_name << ":" << line << ":" << column << ":\n";
+
+  // source line
+  stream << "; ";
+  size_t tab_count = 0;
+  if (line >= lines.size()) {
+    stream << "INVALID LINE NUMBER";
+  } else {
+    const auto line_start = lines[line - 1] + 1, line_end = lines[line];
+    const auto line_length = line_end - line_start;
+    const auto line_str = source.substr(line_start, line_length);
+    if (column > line_length) {
+      // invalid column
+      column = 0;
+    } else if (column > 0) {
+      tab_count =
+          std::count(line_str.cbegin(), line_str.cbegin() + column - 1, '\t');
+    }
+    stream << line_str;
+  }
+  stream << "\n";
+
+  // column
+  if (column > 0) {
+    std::string column_tabs(tab_count, '\t');
+    std::string column_space(column - 1 - tab_count, ' ');
+    stream << "; " << column_tabs << column_space;
+    stream << spvtools::clr::red();
+    stream << "^\n";
+  }
+
+  stream << spvtools::clr::reset();
+}
+
+void debug_asm_base::source_file::load_and_map_source() {
+  processed = true;
+
+  // load file
+  {
+    std::ifstream filestream;
+
+    // don't throw exceptions
+    filestream.exceptions(std::fstream::goodbit);
+
+    filestream.open(file_name, std::fstream::in | std::fstream::binary);
+    if (!filestream.is_open()) {
+      return;
+    }
+
+    // get the file size
+    const auto cur_position = filestream.tellg();
+    filestream.seekg(0, std::ios::end);
+    const auto file_size = filestream.tellg();
+    filestream.seekg(0, std::ios::beg);
+    filestream.seekg(cur_position, std::ios::beg);
+
+    source.resize(file_size);
+    if (source.size() != (size_t)file_size) {
+      return;
+    }
+
+    filestream.read(&source[0], (std::streamsize)file_size);
+    const auto read_size = filestream.gcount();
+    if (read_size != (decltype(read_size))file_size) {
+      return;
+    }
+  }
+
+  // map source
+  // -> we will only need to remove \r characters here (replace \r\n by \n and
+  // replace single \r chars by \n)
+  lines.emplace_back(0); // line #1 start
+  for (auto begin_iter = source.begin(), end_iter = source.end(),
+            iter = begin_iter;
+       iter != end_iter; ++iter) {
+    if (*iter == '\n' || *iter == '\r') {
+      if (*iter == '\r') {
+        auto next_iter = iter + 1;
+        if (next_iter != end_iter && *next_iter == '\n') {
+          // replace \r\n with single \n (erase \r)
+          iter = source.erase(iter); // iter now at '\n'
+          // we now have a new end and begin iter
+          end_iter = source.end();
+          begin_iter = source.begin();
+        } else {
+          // single \r -> \n replace
+          *iter = '\n';
+        }
+      }
+      // else: \n
+
+      // add newline position
+      lines.emplace_back(std::distance(begin_iter, iter));
+    }
+  }
+  // also insert the "<eof> newline"
+  lines.emplace_back(source.size());
+
+  valid = true;
+}
+} // namespace disassemble
+
 namespace {
 
 // Indices to ControlFlowGraph's list of blocks from one block to its successors
@@ -116,7 +233,7 @@ struct ControlFlowGraph {
 class Disassembler {
  public:
   Disassembler(const AssemblyGrammar& grammar, uint32_t options,
-               NameMapper name_mapper)
+               NameMapper name_mapper, uint32_t extend_indent)
       : print_(spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_PRINT, options)),
         nested_indent_(
             spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_NESTED_INDENT, options)),
@@ -124,7 +241,7 @@ class Disassembler {
             spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_REORDER_BLOCKS, options)),
         text_(),
         out_(print_ ? out_stream() : out_stream(text_)),
-        instruction_disassembler_(grammar, out_.get(), options, name_mapper),
+        instruction_disassembler_(grammar, out_.get(), options, name_mapper, extend_indent),
         header_(!spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_NO_HEADER, options)),
         byte_offset_(0) {}
 
@@ -621,20 +738,23 @@ constexpr int kStandardIndent = 15;
 constexpr int kBlockNestIndent = 2;
 constexpr int kBlockBodyIndentOffset = 2;
 constexpr uint32_t kCommentColumn = 50;
+constexpr uint32_t kMaxIndent = 160;
 }  // namespace
 
 namespace disassemble {
 InstructionDisassembler::InstructionDisassembler(const AssemblyGrammar& grammar,
                                                  std::ostream& stream,
                                                  uint32_t options,
-                                                 NameMapper name_mapper)
+                                                 NameMapper name_mapper,
+                                                 uint32_t extend_indent)
     : grammar_(grammar),
       stream_(stream),
       print_(spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_PRINT, options)),
       color_(spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_COLOR, options)),
-      indent_(spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_INDENT, options)
-                  ? kStandardIndent
-                  : 0),
+      debug_asm_(spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_DEBUG_ASM, options)),
+      indent_(spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_INDENT, options) ?
+              std::min(extend_indent > kStandardIndent ?
+                       extend_indent : kStandardIndent, kMaxIndent) : 0),
       nested_indent_(
           spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_NESTED_INDENT, options)),
       comment_(spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_COMMENT, options)),
@@ -696,8 +816,91 @@ void InstructionDisassembler::EmitInstructionImpl(
     stream_ << std::endl;
   }
 
+  // TODO: put all of the debug asm stuff into a separate debug-asm function
+  if (debug_asm_) {
+    // ignore all Op*Name instructions if we're already using debug asm with
+    // friendly names as this would lead to a lot of unhelpful noise
+    const auto sp_opcode = spv::Op(inst.opcode);
+    if (sp_opcode == spv::Op::OpName ||
+        sp_opcode == spv::Op::OpMemberName) {
+      return;
+    }
+
+    if (sp_opcode == spv::Op::OpString) {
+      // NOTE: files will be lazily loaded on first use (we also don't know yet
+      // if this OpString actually is a file name)
+      debug_asm_base::source_file sf;
+      sf.file_name =
+          reinterpret_cast<const char *>(inst.words + inst.operands[1].offset);
+      source_files.emplace(inst.result_id, sf);
+    }
+
+    if (sp_opcode == spv::Op::OpLine) {
+      const auto file_id = inst.words[1];
+      const auto file_iter = source_files.find(file_id);
+      if (file_iter != source_files.end()) {
+        if (last_dbg_line.file_id != file_id ||
+            last_dbg_line.line != inst.words[2] ||
+            last_dbg_line.column != inst.words[3]) {
+          last_dbg_line.set(file_id, inst.words[2], inst.words[3]);
+          file_iter->second.print_line(line, inst.words[2], inst.words[3]);
+        }
+        return;
+      }
+    }
+
+    if (sp_opcode == spv::Op::OpFunction) {
+      line << "\n";
+      // TODO: exec mode
+      line << "function ";
+      // return type
+      line << name_mapper_(inst.type_id) << " ";
+      // function name
+      line << name_mapper_(inst.result_id) << " ( ";
+      
+      // params
+      // TODO: better I/O and params?
+      EmitOperand(line, inst, 3);
+      line << " ) ";
+      
+      // control (skip if None)
+      if (inst.words[3] != 0) {
+        EmitOperand(line, inst, 2);
+        line << " ";
+      }
+      line << "{\n";
+      
+      // signal the next label that it's the first in this function
+      first_label_in_function_ = true;
+      return;
+    }
+    if (sp_opcode == spv::Op::OpFunctionEnd) {
+      line << "}\n";
+      return;
+    }
+    if (sp_opcode == spv::Op::OpLabel) {
+      last_dbg_line.reset();
+
+      // only print a newline if this isn't the first label in a function
+      if (!first_label_in_function_) {
+        line << "\n";
+      } else {
+        first_label_in_function_ = false;
+      }
+      if (inst.result_id) {
+        line << name_mapper_(inst.result_id) << ":\n";
+        // TODO: print predecessors
+        return;
+      }
+    }
+  }
+
   if (inst.result_id) {
-    SetBlue();
+    // blue text is hard to read on black/transparent backgrounds, use red
+    // instead, which should work well on both black and white backgrounds
+    if (!debug_asm_) SetBlue();
+    else SetRed();
+
     const std::string id_name = name_mapper_(inst.result_id);
     if (indent_)
       line << std::setw(std::max(0, indent_ - 3 - int(id_name.size())));
@@ -719,14 +922,36 @@ void InstructionDisassembler::EmitInstructionImpl(
         ' ');
   }
 
-  line << "Op" << spvOpcodeString(opcode);
+  // we know opcodes are opcodes, skip the "Op" for more human-readable names
+  if (!debug_asm_) line << "Op";
+  line << spvOpcodeString(opcode);
 
-  for (uint16_t i = 0; i < inst.num_operands; i++) {
-    const spv_operand_type_t type = inst.operands[i].type;
-    assert(type != SPV_OPERAND_TYPE_NONE);
-    if (type == SPV_OPERAND_TYPE_RESULT_ID) continue;
+  if (debug_asm_ && spv::Op(inst.opcode) == spv::Op::OpPhi) {
     line << " ";
-    EmitOperand(line, inst, i);
+    EmitOperand(line, inst, 0);
+    line << " (";
+    for (uint16_t i = 1; i < inst.num_operands; i++) {
+      const spv_operand_type_t type = inst.operands[i].type;
+      assert(type != SPV_OPERAND_TYPE_NONE);
+      if (type == SPV_OPERAND_TYPE_RESULT_ID) continue;
+
+      line << " ";
+      EmitOperand(line, inst, i);
+      line << " <- ";
+      EmitOperand(line, inst, ++i);
+
+      if (i + 1 < inst.num_operands)
+        line << ",";
+    }
+    line << " )";
+  } else {
+    for (uint16_t i = 0; i < inst.num_operands; i++) {
+      const spv_operand_type_t type = inst.operands[i].type;
+      assert(type != SPV_OPERAND_TYPE_NONE);
+      if (type == SPV_OPERAND_TYPE_RESULT_ID) continue;
+      line << " ";
+      EmitOperand(line, inst, i);
+    }
   }
 
   // For the sake of comment generation, store information from some
@@ -1050,14 +1275,23 @@ std::string spvInstructionBinaryToText(const spv_target_env env,
 
   // Generate friendly names for Ids if requested.
   std::unique_ptr<FriendlyNameMapper> friendly_mapper;
+  std::unique_ptr<spvtools::DebugNameMapper> debug_mapper;
+  uint32_t extend_indent = 0;
   NameMapper name_mapper = GetTrivialNameMapper();
   if (options & SPV_BINARY_TO_TEXT_OPTION_FRIENDLY_NAMES) {
     friendly_mapper = MakeUnique<FriendlyNameMapper>(context, code, wordCount);
     name_mapper = friendly_mapper->GetNameMapper();
+  } else if (options & SPV_BINARY_TO_TEXT_OPTION_DEBUG_ASM) {
+    debug_mapper.reset(
+        new spvtools::DebugNameMapper(context, code, wordCount));
+    name_mapper = debug_mapper->GetNameMapper();
+
+    // always add 4, because of '%' and " = "
+    extend_indent = debug_mapper->GetMaxNameLength() + 4;
   }
 
   // Now disassemble!
-  Disassembler disassembler(grammar, options, name_mapper);
+  Disassembler disassembler(grammar, options, name_mapper, extend_indent);
   WrappedDisassembler wrapped(&disassembler, instCode, instWordCount);
   spvBinaryParse(context, &wrapped, code, wordCount, DisassembleTargetHeader,
                  DisassembleTargetInstruction, nullptr);
@@ -1091,15 +1325,24 @@ spv_result_t spvBinaryToText(const spv_const_context context,
 
   // Generate friendly names for Ids if requested.
   std::unique_ptr<spvtools::FriendlyNameMapper> friendly_mapper;
+  std::unique_ptr<spvtools::DebugNameMapper> debug_mapper;
   spvtools::NameMapper name_mapper = spvtools::GetTrivialNameMapper();
+  uint32_t extend_indent = 0;
   if (options & SPV_BINARY_TO_TEXT_OPTION_FRIENDLY_NAMES) {
     friendly_mapper = spvtools::MakeUnique<spvtools::FriendlyNameMapper>(
         &hijack_context, code, wordCount);
     name_mapper = friendly_mapper->GetNameMapper();
+  } else if (options & SPV_BINARY_TO_TEXT_OPTION_DEBUG_ASM) {
+    debug_mapper.reset(
+        new spvtools::DebugNameMapper(&hijack_context, code, wordCount));
+    name_mapper = debug_mapper->GetNameMapper();
+
+    // always add 4, because of '%' and " = "
+    extend_indent = debug_mapper->GetMaxNameLength() + 4;
   }
 
   // Now disassemble!
-  spvtools::Disassembler disassembler(grammar, options, name_mapper);
+  spvtools::Disassembler disassembler(grammar, options, name_mapper, extend_indent);
   if (auto error =
           spvBinaryParse(&hijack_context, &disassembler, code, wordCount,
                          spvtools::DisassembleHeader,

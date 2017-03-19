@@ -50,7 +50,9 @@ option(SPIRV_ALLOW_TIMERS "Allow timers via clock_gettime on supported platforms
 
 if("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
   set(SPIRV_TIMER_ENABLED ${SPIRV_ALLOW_TIMERS})
-elseif("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "FreeBSD")
+  add_definitions(-DSPIRV_LINUX)
+elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
   add_definitions(-DSPIRV_WINDOWS)
 elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "CYGWIN")
   add_definitions(-DSPIRV_WINDOWS)
