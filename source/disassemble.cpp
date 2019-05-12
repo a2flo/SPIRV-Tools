@@ -179,7 +179,7 @@ void Disassembler::source_file::print_line(std::ostream &stream,
   uint32_t column = column_;
 
   // TODO: color flag test
-  stream << libspirv::clr::green();
+  stream << spvtools::clr::green();
 
   // file
   stream << "; " << file_name << ":" << line << ":" << column << ":\n";
@@ -209,11 +209,11 @@ void Disassembler::source_file::print_line(std::ostream &stream,
     std::string column_tabs(tab_count, '\t');
     std::string column_space(column - 1 - tab_count, ' ');
     stream << "; " << column_tabs << column_space;
-    stream << libspirv::clr::red();
+    stream << spvtools::clr::red();
     stream << "^\n";
   }
 
-  stream << libspirv::clr::reset();
+  stream << spvtools::clr::reset();
 }
 
 void Disassembler::source_file::load_and_map_source() {
@@ -735,7 +735,7 @@ spv_result_t spvBinaryToText(const spv_const_context context,
     name_mapper = friendly_mapper->GetNameMapper();
   } else if (options & SPV_BINARY_TO_TEXT_OPTION_DEBUG_ASM) {
     debug_mapper.reset(
-        new libspirv::DebugNameMapper(&hijack_context, code, wordCount));
+        new spvtools::DebugNameMapper(&hijack_context, code, wordCount));
     name_mapper = debug_mapper->GetNameMapper();
 
     // always add 4, because of '%' and " = "
@@ -768,15 +768,24 @@ std::string spvtools::spvInstructionBinaryToText(const spv_target_env env,
 
   // Generate friendly names for Ids if requested.
   std::unique_ptr<spvtools::FriendlyNameMapper> friendly_mapper;
+  std::unique_ptr<spvtools::DebugNameMapper> debug_mapper;
   spvtools::NameMapper name_mapper = spvtools::GetTrivialNameMapper();
+  uint32_t extend_indent = 0;
   if (options & SPV_BINARY_TO_TEXT_OPTION_FRIENDLY_NAMES) {
     friendly_mapper = spvtools::MakeUnique<spvtools::FriendlyNameMapper>(
         context, code, wordCount);
     name_mapper = friendly_mapper->GetNameMapper();
+  } else if (options & SPV_BINARY_TO_TEXT_OPTION_DEBUG_ASM) {
+    debug_mapper.reset(
+        new spvtools::DebugNameMapper(context, code, wordCount));
+    name_mapper = debug_mapper->GetNameMapper();
+
+    // always add 4, because of '%' and " = "
+    extend_indent = debug_mapper->GetMaxNameLength() + 4;
   }
 
   // Now disassemble!
-  Disassembler disassembler(grammar, options, name_mapper);
+  Disassembler disassembler(grammar, options, name_mapper, extend_indent);
   WrappedDisassembler wrapped(&disassembler, instCode, instWordCount);
   spvBinaryParse(context, &wrapped, code, wordCount, DisassembleTargetHeader,
                  DisassembleTargetInstruction, nullptr);
