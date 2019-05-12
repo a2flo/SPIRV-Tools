@@ -67,6 +67,8 @@ class FriendlyNameMapper {
   FriendlyNameMapper(const spv_const_context context, const uint32_t* code,
                      const size_t wordCount, const bool runParser = true);
 
+  virtual ~FriendlyNameMapper() = default;
+
   // Returns a NameMapper which maps ids to the friendly names parsed from the
   // module provided to the constructor.
   NameMapper GetNameMapper() {
@@ -128,6 +130,8 @@ class DebugNameMapper : public FriendlyNameMapper {
  public:
   DebugNameMapper(const spv_const_context context, const uint32_t* code,
                   const size_t wordCount);
+
+  virtual ~DebugNameMapper() = default;
 
   // Returns the maximum name length in the module.
   uint32_t GetMaxNameLength() const {
