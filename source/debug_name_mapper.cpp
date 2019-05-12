@@ -29,7 +29,7 @@ namespace spvtools {
 
 DebugNameMapper::DebugNameMapper(const spv_const_context context,
                                  const uint32_t *code, const size_t wordCount)
-    : libspirv::FriendlyNameMapper(context, code, wordCount, false) {
+    : spvtools::FriendlyNameMapper(context, code, wordCount, false) {
   // add a few more allowed characters that we need for nicer type names
   valid_chars_ += ".:,_-[]()*<>#@";
 
@@ -239,10 +239,10 @@ DebugNameMapper::ParseInstruction(const spv_parsed_instruction_t &inst) {
           break;
         case SPV_NUMBER_FLOATING:
           if (operand.number_bit_width == 16) {
-            name << spvutils::FloatProxy<spvutils::Float16>(
+            name << spvtools::utils::FloatProxy<spvtools::utils::Float16>(
                 uint16_t(word & 0xFFFF));
           } else {
-            name << spvutils::FloatProxy<float>(word);
+            name << spvtools::utils::FloatProxy<float>(word);
           }
           if (name.str().find('.') == std::string::npos) {
             name << ".0";
@@ -263,7 +263,7 @@ DebugNameMapper::ParseInstruction(const spv_parsed_instruction_t &inst) {
           name << bits;
           break;
         case SPV_NUMBER_FLOATING:
-          name << spvutils::FloatProxy<double>(bits);
+          name << spvtools::utils::FloatProxy<double>(bits);
           break;
         default:
           assert(false && "Unreachable");
@@ -293,4 +293,4 @@ DebugNameMapper::ParseInstruction(const spv_parsed_instruction_t &inst) {
   return SPV_SUCCESS;
 }
 
-} // namespace libspirv
+} // namespace spvtools
