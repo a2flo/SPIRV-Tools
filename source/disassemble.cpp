@@ -337,6 +337,7 @@ spv_result_t Disassembler::HandleInstruction(
     stream_ << std::endl;
     stream_ << std::string(indent_, ' ');
     stream_ << "; Types, variables and constants" << std::endl;
+  }
 
   // TODO: put all of the debug asm stuff into a separate debug-asm function
   if (debug_asm_) {
