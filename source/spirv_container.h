@@ -20,6 +20,7 @@
 #include <iostream>
 #include <cstdint>
 #include <cstring>
+#include "tools/io.h"
 
 //! This class implements a simple SPIR-V container format that can be used to
 //! easily bundle multiple SPIR-V modules in a single file. Alternatively, it
@@ -54,6 +55,8 @@ public:
     const uint32_t *const data;
     //! size of the SPIR-V module in 32-bit uint words
     const size_t size;
+    //! metadata: function types + names
+    std::vector<std::pair<uint32_t /* type */, std::string /* name */>> functions;
     module(const uint32_t *const data_, const size_t &size_) noexcept
         : data(data_), size(size_) {}
   };
@@ -96,19 +99,51 @@ public:
         valid = false;
         return;
       }
+      const auto data_size = data.size() * sizeof(uint32_t);
+      const auto data_end_ptr = ((const char*)&data[0]) + data_size;
 
       // process entries
       modules.reserve(entry_count);
       for (uint32_t i = 0; i < entry_count; ++i, running_offset += 2) {
-        // contents[running_offset] ignored (contains function count)
+        const auto function_count = data[running_offset];
         const auto module_word_count = data[running_offset + 1];
         modules.emplace_back(&data[spirv_data_offset], module_word_count);
+        modules.back().functions.resize(function_count);
         spirv_data_offset += module_word_count;
       }
+      running_offset = spirv_data_offset;
 
-      // we're done here - metadata is ignored at this point
+      // process metadata
+      for (uint32_t module_idx = 0; module_idx < entry_count; ++module_idx) {
+        auto& module = modules[module_idx];
+        const auto func_count = module.functions.size();
 
-      if (spirv_data_offset > data.size()) {
+        for (size_t func_idx = 0; func_idx < func_count; ++func_idx) {
+          module.functions[func_idx].first = data[running_offset++];
+        }
+
+        for (size_t func_idx = 0; func_idx < func_count; ++func_idx) {
+          const auto data_ptr = (const char*)&data[running_offset];
+          if (std::find(data_ptr, data_end_ptr, '\0') == data_end_ptr) {
+            diag << "invalid SPIR-V container: function name has no terminator\n";
+            valid = false;
+            return;
+          }
+          module.functions[func_idx].second = data_ptr; // string is \0 terminated
+
+          auto padded_len = (uint32_t)module.functions[func_idx].second.size();
+          padded_len += 4u - (padded_len % 4u);
+          if ((running_offset * 4u) + padded_len > data_size) {
+            diag << "invalid SPIR-V container: invalid function name size (not padded?)\n";
+            valid = false;
+            return;
+          }
+          running_offset += padded_len / 4u;
+        }
+      }
+
+      // we're done here
+      if (running_offset > data.size()) {
         diag << "invalid SPIR-V container size (SPIR-V data too large)\n";
         valid = false;
         return;
@@ -120,7 +155,74 @@ public:
   }
 
   // TODO: construct from a file
-  // TODO: assemble/construct from multiple modules
+
+  //! rebuilds this container by assembling all specified modules
+  template <typename F = decltype(std::cerr)>
+  bool rebuild(const std::vector<module>& new_modules, F &diag = std::cerr) {
+    data.clear();
+    modules.clear();
+    container = true;
+    
+    // write new header
+    data.emplace_back(0x43565053 /* little-endian SPVC */);
+    data.emplace_back(SPIRV_CONTAINER_VERSION);
+    const auto new_module_count = (uint32_t)new_modules.size();
+    data.emplace_back(new_module_count);
+    
+    // write header entries
+    uint32_t add_reserve_size = 0;
+    for (const auto& module : new_modules) {
+      if (module.functions.empty()) {
+        diag << "no functions in module\n";
+        return false;
+      }
+      data.emplace_back((uint32_t)module.functions.size());
+      data.emplace_back(module.size);
+      add_reserve_size += module.size;
+    }
+    
+    // write individual modules
+    data.reserve(data.size() + add_reserve_size);
+    std::vector<uint32_t> module_offsets;
+    for (const auto& module : new_modules) {
+      module_offsets.emplace_back((uint32_t)data.size());
+      data.insert(data.end(), module.data, module.data + module.size);
+    }
+    
+    // write additional metadata
+    for (const auto& module : new_modules) {
+      // function types
+      for (const auto& func : module.functions) {
+        data.emplace_back(func.first);
+      }
+      // function names
+      for (const auto& func : module.functions) {
+        const auto name_len = (uint32_t)func.second.size();
+        const auto name_padding = 4u - (name_len % 4u);
+        assert((name_len + name_padding) % 4u == 0u);
+        auto cur_offset = data.size();
+        data.resize(cur_offset + ((name_len + name_padding) / 4u));
+        memcpy(&data[cur_offset], func.second.c_str(), name_len);
+        memset(((uint8_t*)&data[cur_offset]) + name_len, 0, name_padding);
+      }
+    }
+    
+    // update container modules
+    for (uint32_t mod_idx = 0; mod_idx < new_module_count; ++mod_idx) {
+      modules.emplace_back(module(&data[module_offsets[mod_idx]], new_modules[mod_idx].size));
+      modules.back().functions = new_modules[mod_idx].functions;
+    }
+    
+    return true;
+  }
+
+  //! writes the data of this container to the specified "out_file"
+  bool write(const char* out_file) const {
+    if (!WriteFile<uint32_t>(out_file, "wb", &data[0], data.size())) {
+      return false;
+    }
+    return true;
+  }
 
   //! returns true if this is a container, false if it's a simple SPIR-V file
   bool is_container() const { return container; }
