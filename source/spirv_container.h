@@ -17,9 +17,11 @@
 
 #include <vector>
 #include <utility>
+#include <algorithm>
 #include <iostream>
 #include <cstdint>
 #include <cstring>
+#include <cassert>
 #include "tools/io.h"
 
 //! This class implements a simple SPIR-V container format that can be used to
