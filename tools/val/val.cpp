@@ -201,7 +201,10 @@ int main(int argc, char** argv) {
   bool succeed = true;
   for (const auto& module : container) {
     spvtools::SpirvTools tools(target_env);
-    tools.SetMessageConsumer(spvtools::utils::CLIMessageConsumer);
+    tools.SetMessageConsumer([&module](spv_message_level_t level, const char* source, const spv_position_t& position, const char* message) {
+      std::cerr << "in module " << (!module.functions.empty() ? module.functions[0].second : "<unknown>") << ": source " << (source ? source : "<unknown>") << ":" << std::endl;
+      spvtools::utils::CLIMessageConsumer(level, source, position, message);
+    });
 
     succeed &= tools.Validate(module.data, module.size, options);
   }
