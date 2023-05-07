@@ -304,6 +304,11 @@ bool ValidationState_t::IsOpcodeInCurrentLayoutSection(spv::Op op) {
 
 DiagnosticStream ValidationState_t::diag(spv_result_t error_code,
                                          const Instruction* inst) {
+  return diag(error_code, std::vector<const Instruction*> { inst });
+}
+
+DiagnosticStream ValidationState_t::diag(spv_result_t error_code,
+                                         std::vector<const Instruction*> insts) {
   if (error_code == SPV_WARNING) {
     if (num_of_warnings_ == max_num_of_warnings_) {
       DiagnosticStream({0, 0, 0}, context_->consumer, "", error_code)
@@ -316,9 +321,15 @@ DiagnosticStream ValidationState_t::diag(spv_result_t error_code,
   }
 
   std::string disassembly;
-  if (inst) disassembly = Disassemble(*inst);
+  for (const auto& inst: insts) {
+    if (inst) {
+      disassembly += "\n<ID> " + std::to_string(inst->id()) + ": " + Disassemble(*inst) + '\n';
+    }
+  }
 
-  return DiagnosticStream({0, 0, inst ? inst->LineNum() : 0},
+  const auto line_num = (insts.empty() && insts[0] ? insts[0]->LineNum() : 0);
+
+  return DiagnosticStream({0, 0, line_num},
                           context_->consumer, disassembly, error_code);
 }
 

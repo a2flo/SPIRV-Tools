@@ -311,6 +311,7 @@ spv_result_t DisassembleTargetInstruction(
 }
 
 constexpr int kStandardIndent = 15;
+constexpr uint32_t kMaxIndent = 160;
 }  // namespace
 
 namespace disassemble {
@@ -325,8 +326,8 @@ InstructionDisassembler::InstructionDisassembler(const AssemblyGrammar& grammar,
       color_(spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_COLOR, options)),
       debug_asm_(spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_DEBUG_ASM, options)),
       indent_(spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_INDENT, options) ?
-              (extend_indent > kStandardIndent ?
-               extend_indent : kStandardIndent) : 0),
+              std::min(extend_indent > kStandardIndent ?
+                       extend_indent : kStandardIndent, kMaxIndent) : 0),
       comment_(spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_COMMENT, options)),
       show_byte_offset_(
           spvIsInBitfield(SPV_BINARY_TO_TEXT_OPTION_SHOW_BYTE_OFFSET, options)),

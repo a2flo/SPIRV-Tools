@@ -31,7 +31,7 @@ DebugNameMapper::DebugNameMapper(const spv_const_context context,
                                  const uint32_t *code, const size_t wordCount)
     : spvtools::FriendlyNameMapper(context, code, wordCount, false) {
   // add a few more allowed characters that we need for nicer type names
-  valid_chars_ += ".:,_-[]()*<>#@";
+  valid_chars_ += ".:,_-[]()*<>=!#@";
 
   // run the parsing step
   spv_diagnostic diag = nullptr;
