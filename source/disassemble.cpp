@@ -872,10 +872,12 @@ void InstructionDisassembler::EmitInstructionImpl(
       
       // signal the next label that it's the first in this function
       first_label_in_function_ = true;
+      stream_ << line.str();
       return;
     }
     if (sp_opcode == spv::Op::OpFunctionEnd) {
       line << "}\n";
+      stream_ << line.str();
       return;
     }
     if (sp_opcode == spv::Op::OpLabel) {
@@ -889,6 +891,7 @@ void InstructionDisassembler::EmitInstructionImpl(
       }
       if (inst.result_id) {
         line << name_mapper_(inst.result_id) << ":\n";
+        stream_ << line.str();
         // TODO: print predecessors
         return;
       }
