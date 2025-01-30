@@ -43,7 +43,7 @@
 #include "source/spirv_endian.h"
 #include "source/util/hex_float.h"
 #include "source/util/make_unique.h"
-#include "spirv-tools/libspirv.h"
+//#include "spirv-tools/libspirv.h"
 
 namespace spvtools {
 
@@ -898,14 +898,14 @@ void InstructionDisassembler::EmitInstructionImpl(
   if (inst.result_id) {
     // blue text is hard to read on black/transparent backgrounds, use red
     // instead, which should work well on both black and white backgrounds
-    if (!debug_asm_) SetBlue();
-    else SetRed();
+    if (!debug_asm_) SetBlue(line);
+    else SetRed(line);
 
     const std::string id_name = name_mapper_(inst.result_id);
     if (indent_)
       line << std::setw(std::max(0, indent_ - 3 - int(id_name.size())));
     line << "%" << id_name;
-    ResetColor();
+    ResetColor(line);
     line << " = ";
   } else {
     line << std::string(indent_, ' ');
