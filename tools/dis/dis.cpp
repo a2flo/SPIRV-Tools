@@ -148,6 +148,7 @@ int main(int, const char** argv) {
 
   if (flags::debug_asm.value()) {
     options |= SPV_BINARY_TO_TEXT_OPTION_DEBUG_ASM;
+    options |= SPV_BINARY_TO_TEXT_OPTION_COMMENT;
     options &= ~SPV_BINARY_TO_TEXT_OPTION_FRIENDLY_NAMES;
   }
 
