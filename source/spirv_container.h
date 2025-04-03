@@ -52,20 +52,20 @@ public:
   enum : uint32_t { SPIRV_CONTAINER_VERSION = 2u };
 
   //! module entry in this container
-  struct module {
+  struct module_t {
     //! pointer to the beginning of a SPIR-V module
     const uint32_t *const data;
     //! size of the SPIR-V module in 32-bit uint words
     const size_t size;
     //! metadata: function types + names
     std::vector<std::pair<uint32_t /* type */, std::string /* name */>> functions;
-    module(const uint32_t *const data_, const size_t &size_) noexcept
+    module_t(const uint32_t *const data_, const size_t &size_) noexcept
         : data(data_), size(size_) {}
   };
 
 protected:
   std::vector<uint32_t> data;
-  std::vector<module> modules;
+  std::vector<module_t> modules;
   bool container{false};
   bool valid{true};
 
@@ -117,11 +117,11 @@ public:
 
       // process metadata
       for (uint32_t module_idx = 0; module_idx < entry_count; ++module_idx) {
-        auto& module = modules[module_idx];
-        const auto func_count = module.functions.size();
+        auto& mod = modules[module_idx];
+        const auto func_count = mod.functions.size();
 
         for (size_t func_idx = 0; func_idx < func_count; ++func_idx) {
-          module.functions[func_idx].first = data[running_offset++];
+          mod.functions[func_idx].first = data[running_offset++];
         }
 
         for (size_t func_idx = 0; func_idx < func_count; ++func_idx) {
@@ -131,9 +131,9 @@ public:
             valid = false;
             return;
           }
-          module.functions[func_idx].second = data_ptr; // string is \0 terminated
+          mod.functions[func_idx].second = data_ptr; // string is \0 terminated
 
-          auto padded_len = (uint32_t)module.functions[func_idx].second.size();
+          auto padded_len = (uint32_t)mod.functions[func_idx].second.size();
           padded_len += 4u - (padded_len % 4u);
           if ((running_offset * 4u) + padded_len > data_size) {
             diag << "invalid SPIR-V container: invalid function name size (not padded?)\n";
@@ -160,7 +160,7 @@ public:
 
   //! rebuilds this container by assembling all specified modules
   template <typename F = decltype(std::cerr)>
-  bool rebuild(const std::vector<module>& new_modules, F &diag = std::cerr) {
+  bool rebuild(const std::vector<module_t>& new_modules, F &diag = std::cerr) {
     data.clear();
     modules.clear();
     container = true;
@@ -173,32 +173,32 @@ public:
     
     // write header entries
     uint32_t add_reserve_size = 0;
-    for (const auto& module : new_modules) {
-      if (module.functions.empty()) {
+    for (const auto& mod : new_modules) {
+      if (mod.functions.empty()) {
         diag << "no functions in module\n";
         return false;
       }
-      data.emplace_back((uint32_t)module.functions.size());
-      data.emplace_back(module.size);
-      add_reserve_size += module.size;
+      data.emplace_back((uint32_t)mod.functions.size());
+      data.emplace_back(mod.size);
+      add_reserve_size += mod.size;
     }
     
     // write individual modules
     data.reserve(data.size() + add_reserve_size);
     std::vector<uint32_t> module_offsets;
-    for (const auto& module : new_modules) {
+    for (const auto& mod : new_modules) {
       module_offsets.emplace_back((uint32_t)data.size());
-      data.insert(data.end(), module.data, module.data + module.size);
+      data.insert(data.end(), mod.data, mod.data + mod.size);
     }
     
     // write additional metadata
-    for (const auto& module : new_modules) {
+    for (const auto& mod : new_modules) {
       // function types
-      for (const auto& func : module.functions) {
+      for (const auto& func : mod.functions) {
         data.emplace_back(func.first);
       }
       // function names
-      for (const auto& func : module.functions) {
+      for (const auto& func : mod.functions) {
         const auto name_len = (uint32_t)func.second.size();
         const auto name_padding = 4u - (name_len % 4u);
         assert((name_len + name_padding) % 4u == 0u);
@@ -211,7 +211,7 @@ public:
     
     // update container modules
     for (uint32_t mod_idx = 0; mod_idx < new_module_count; ++mod_idx) {
-      modules.emplace_back(module(&data[module_offsets[mod_idx]], new_modules[mod_idx].size));
+      modules.emplace_back(module_t(&data[module_offsets[mod_idx]], new_modules[mod_idx].size));
       modules.back().functions = new_modules[mod_idx].functions;
     }
     

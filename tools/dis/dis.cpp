@@ -70,8 +70,12 @@ Options:
 
   --comment         Add comments to make reading easier
 
-  --debug-asm     Print more human-friendly assembly for debugging purposes.
-                  NOT intended for reassembling a SPIR-V binary.
+  --debug-asm       Print more human-friendly assembly for debugging purposes.
+                    NOT intended for reassembling a SPIR-V binary.
+
+  --filter <name>   Only print functions starting with <name>.
+                    Note that this only works as intended for Vulkan SPIR-V
+                    container files containing a single function per module.
 )";
 
 // clang-format off
@@ -89,6 +93,7 @@ FLAG_LONG_bool   (reorder_blocks, /* default_value= */ false, /* required= */ fa
 FLAG_LONG_bool   (offsets,        /* default_value= */ false, /* required= */ false);
 FLAG_LONG_bool   (comment,        /* default_value= */ false, /* required= */ false);
 FLAG_LONG_bool   (debug_asm,      /* default_value= */ false, /* required= */ false);
+FLAG_LONG_string (filter,         /* default_value= */ "",    /* required= */ false);
 // clang-format on
 
 static const auto kDefaultEnvironment = SPV_ENV_UNIVERSAL_1_5;
@@ -187,10 +192,24 @@ int main(int, const char** argv) {
   spv_text* textOrNull = print_to_stdout ? nullptr : &text;
   spv_diagnostic diagnostic = nullptr;
 
-  for (const auto& module : container) {
+  const auto filter = flags::filter.value();
+  for (const auto& mod : container) {
+    bool any_match = filter.empty();
+    if (!any_match) {
+      for (const auto& func : mod.functions) {
+        if (func.second.find(filter) == 0) {
+          any_match = true;
+          break;
+        }
+      }
+      if (!any_match) {
+        continue;
+      }
+    }
+
     spv_context context = spvContextCreate(kDefaultEnvironment);
     spv_result_t error =
-        spvBinaryToText(context, module.data, module.size, options,
+        spvBinaryToText(context, mod.data, mod.size, options,
                         textOrNull, &diagnostic);
     spvContextDestroy(context);
     if (error) {

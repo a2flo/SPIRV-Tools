@@ -887,12 +887,12 @@ int main(int argc, const char** argv) {
   }
 
   std::vector<std::vector<uint32_t>> optimized_bins;
-  std::vector<spirv_container::module> optimized_modules;
-  for (auto& module : container) {
+  std::vector<spirv_container::module_t> optimized_modules;
+  for (auto& mod : container) {
     std::vector<uint32_t> optimized_bin;
-    optimized_bin.reserve(module.size);
+    optimized_bin.reserve(mod.size);
     // abort immediately if opt failed
-    if (!optimizer.Run(module.data, module.size, &optimized_bin,
+    if (!optimizer.Run(mod.data, mod.size, &optimized_bin,
                        optimizer_options)) {
       return 1;
     }
@@ -900,9 +900,9 @@ int main(int argc, const char** argv) {
 
     // if container: create new (tmp) module
     if (container.is_container()) {
-      spirv_container::module opt_mod(optimized_bins.back().data(),
-                                      optimized_bins.back().size());
-      opt_mod.functions = module.functions; // just copy old metadata
+      spirv_container::module_t opt_mod(optimized_bins.back().data(),
+                                        optimized_bins.back().size());
+      opt_mod.functions = mod.functions; // just copy old metadata
       optimized_modules.emplace_back(opt_mod);
     }
   }
