@@ -24,6 +24,7 @@
 
 #include "source/opt/log.h"
 #include "source/spirv_target_env.h"
+#include "source/spirv_container.h"
 #include "source/util/string_utils.h"
 #include "spirv-tools/libspirv.hpp"
 #include "spirv-tools/optimizer.hpp"
@@ -877,17 +878,18 @@ int main(int argc, const char** argv) {
 
   spv_target_env target_env = kDefaultEnvironment;
 
-  spvtools::Optimizer optimizer(target_env);
-  optimizer.SetMessageConsumer(spvtools::utils::CLIMessageConsumer);
+  // only dummy init here, see reasoning further below
+  spvtools::Optimizer dummy_optimizer(target_env);
+  dummy_optimizer.SetMessageConsumer(spvtools::utils::CLIMessageConsumer);
 
-  spvtools::ValidatorOptions validator_options;
-  spvtools::OptimizerOptions optimizer_options;
-  OptStatus status = ParseFlags(argc, argv, &optimizer, &in_file, &out_file,
-                                &validator_options, &optimizer_options);
-  optimizer_options.set_validator_options(validator_options);
+  spvtools::ValidatorOptions dummy_validator_options;
+  spvtools::OptimizerOptions dummy_optimizer_options;
+  OptStatus init_status = ParseFlags(argc, argv, &dummy_optimizer, &in_file, &out_file,
+                                     &dummy_validator_options, &dummy_optimizer_options);
+  dummy_optimizer_options.set_validator_options(dummy_validator_options);
 
-  if (status.action == OPT_STOP) {
-    return status.code;
+  if (init_status.action == OPT_STOP) {
+    return init_status.code;
   }
 
   if (out_file == nullptr) {
@@ -895,19 +897,68 @@ int main(int argc, const char** argv) {
     return 1;
   }
 
-  std::vector<uint32_t> binary;
-  if (!ReadBinaryFile(in_file, &binary)) {
+  std::vector<uint32_t> contents;
+  if (!ReadBinaryFile(in_file, &contents)) {
+    return 1;
+  }
+  spirv_container container { std::move(contents) };
+  if (!container.is_valid()) {
+    // neither a valid SPIR-V file, nor a valid container
     return 1;
   }
 
-  // By using the same vector as input and output, we save time in the case
-  // that there was no change.
-  bool ok =
-      optimizer.Run(binary.data(), binary.size(), &binary, optimizer_options);
+  std::vector<std::vector<uint32_t>> optimized_bins;
+  std::vector<spirv_container::module_t> optimized_modules;
+  for (auto& mod : container) {
+    // NOTE: we have to create a new optimizer object for every module we want to run through here,
+    //       because internal optimizer state changes so that additional runs are not possible
+    in_file = nullptr;
+    out_file = nullptr;
+    spvtools::Optimizer optimizer(target_env);
+    optimizer.SetMessageConsumer(spvtools::utils::CLIMessageConsumer);
+    spvtools::ValidatorOptions validator_options;
+    spvtools::OptimizerOptions optimizer_options;
+    OptStatus status = ParseFlags(argc, argv, &optimizer, &in_file, &out_file,
+                                  &validator_options, &optimizer_options);
+    if (status.action == OPT_STOP) {
+      return status.code;
+    }
+    optimizer_options.set_validator_options(validator_options);
 
-  if (!WriteFile<uint32_t>(out_file, "wb", binary.data(), binary.size())) {
+    std::vector<uint32_t> optimized_bin;
+    optimized_bin.reserve(mod.size);
+    // abort immediately if opt failed
+    if (!optimizer.Run(mod.data, mod.size, &optimized_bin,
+                       optimizer_options)) {
+      return 1;
+    }
+    optimized_bins.emplace_back(std::move(optimized_bin));
+
+    // if container: create new (tmp) module
+    if (container.is_container()) {
+      spirv_container::module_t opt_mod(optimized_bins.back().data(),
+                                        optimized_bins.back().size());
+      opt_mod.functions = mod.functions; // just copy old metadata
+      optimized_modules.emplace_back(opt_mod);
+    }
+  }
+  assert(!optimized_bins.empty());
+
+  if (!container.is_container()) {
+    // non-container: just write the binary
+    if (!WriteFile<uint32_t>(out_file, "wb", optimized_bins[0].data(),
+                             optimized_bins[0].size())) {
+      return 1;
+    }
+    return 0;
+  }
+
+  // container: rebuild
+  container.rebuild(optimized_modules);
+
+  if (!container.write(out_file)) {
     return 1;
   }
 
-  return ok ? 0 : 1;
+  return 0;
 }

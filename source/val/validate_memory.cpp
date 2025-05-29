@@ -1834,7 +1834,8 @@ spv_result_t ValidateAccessChain(ValidationState_t& _,
         return _.diag(SPV_ERROR_INVALID_ID, inst)
                << "Op" << spvOpcodeString(opcode)
                << " reached non-composite type while indexes "
-                  "still remain to be traversed.";
+                  "still remain to be traversed.\n"
+               << "  " << _.Disassemble(*inst);
       }
     }
   }
@@ -1848,7 +1849,7 @@ spv_result_t ValidateAccessChain(ValidationState_t& _,
     // The type being pointed to should be the same as the result type.
     if (type_pointee->id() != result_type_pointee->id()) {
       bool same_type = result_type_pointee->opcode() == type_pointee->opcode();
-      return _.diag(SPV_ERROR_INVALID_ID, inst)
+      return _.diag(SPV_ERROR_INVALID_ID, { inst, result_type_pointee, type_pointee })
              << "Op" << spvOpcodeString(opcode) << " result type <id> "
              << _.getIdName(result_type_pointee->id()) << " (Op"
              << spvOpcodeString(result_type_pointee->opcode())

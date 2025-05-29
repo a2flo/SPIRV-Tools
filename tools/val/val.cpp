@@ -24,6 +24,7 @@
 #include "spirv-tools/libspirv.hpp"
 #include "tools/io.h"
 #include "tools/util/cli_consumer.h"
+#include "source/spirv_container.h"
 
 void print_usage(char* argv0) {
   std::string target_env_list = spvTargetEnvList(36, 105);
@@ -89,7 +90,11 @@ bool process_single_file(const char* filename, spv_target_env& target_env,
   std::vector<uint32_t> contents;
   if (!ReadBinaryFile(filename, &contents)) return false;
 
-  spvtools::SpirvTools tools(target_env);
+  spirv_container container { std::move(contents) };
+  if (!container.is_valid()) {
+    // neither a valid SPIR-V file, nor a valid container
+    return false;
+  }
 
   // Use a lambda expression here so filename can be captured. Messages use a
   // fairly standard notation of `filename:line`.
@@ -121,13 +126,18 @@ bool process_single_file(const char* filename, spv_target_env& target_env,
         }
       };
 
-  if (use_default_msg_consumer) {
-    tools.SetMessageConsumer(spvtools::utils::CLIMessageConsumer);
-  } else {
-    tools.SetMessageConsumer(CLIMessageConsumerWithFilename);
+  bool success = true;
+  for (const auto& module : container) {
+    spvtools::SpirvTools tools(target_env);
+    tools.SetMessageConsumer([&module](spv_message_level_t level, const char* source, const spv_position_t& position, const char* message) {
+      std::cerr << "in module " << (!module.functions.empty() ? module.functions[0].second : "<unknown>") << ": source " << (source ? source : "<unknown>") << ":" << std::endl;
+      spvtools::utils::CLIMessageConsumer(level, source, position, message);
+    });
+
+    success &= tools.Validate(module.data, module.size, options);
   }
 
-  return tools.Validate(contents.data(), contents.size(), options);
+  return success;
 }
 
 int main(int argc, char** argv) {

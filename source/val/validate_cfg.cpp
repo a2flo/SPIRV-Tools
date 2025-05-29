@@ -755,7 +755,7 @@ spv_result_t StructuredControlFlowChecks(
     // If the header is reachable, the merge is guaranteed to be structurally
     // reachable.
     if (!header->structurally_dominates(*merge)) {
-      return _.diag(SPV_ERROR_INVALID_CFG, _.FindDef(merge->id()))
+      return _.diag(SPV_ERROR_INVALID_CFG, { _.FindDef(header->id()), _.FindDef(merge->id()) })
              << ConstructErrorString(construct, _.getIdName(header->id()),
                                      _.getIdName(merge->id()),
                                      "does not structurally dominate");
@@ -764,7 +764,7 @@ spv_result_t StructuredControlFlowChecks(
     // If it's really a merge block for a selection or loop, then it must be
     // *strictly* structrually dominated by the header.
     if (construct.ExitBlockIsMergeBlock() && (header == merge)) {
-      return _.diag(SPV_ERROR_INVALID_CFG, _.FindDef(merge->id()))
+      return _.diag(SPV_ERROR_INVALID_CFG, { _.FindDef(header->id()), _.FindDef(merge->id()) })
              << ConstructErrorString(construct, _.getIdName(header->id()),
                                      _.getIdName(merge->id()),
                                      "does not strictly structurally dominate");
@@ -774,7 +774,7 @@ spv_result_t StructuredControlFlowChecks(
     // post-dominance only make sense when the construct is reachable.
     if (construct.type() == ConstructType::kContinue) {
       if (!merge->structurally_postdominates(*header)) {
-        return _.diag(SPV_ERROR_INVALID_CFG, _.FindDef(merge->id()))
+        return _.diag(SPV_ERROR_INVALID_CFG, { _.FindDef(header->id()), _.FindDef(merge->id()) })
                << ConstructErrorString(construct, _.getIdName(header->id()),
                                        _.getIdName(merge->id()),
                                        "is not structurally post dominated by");
@@ -790,7 +790,7 @@ spv_result_t StructuredControlFlowChecks(
       for (auto succ : *block->successors()) {
         if (!construct_blocks.count(succ) &&
             !construct.IsStructuredExit(_, succ)) {
-          return _.diag(SPV_ERROR_INVALID_CFG, _.FindDef(block->id()))
+          return _.diag(SPV_ERROR_INVALID_CFG, { _.FindDef(block->id()), _.FindDef(header->id()) })
                  << "block <ID> " << _.getIdName(block->id()) << " exits the "
                  << construct_name << " headed by <ID> "
                  << _.getIdName(header->id())
@@ -802,7 +802,7 @@ spv_result_t StructuredControlFlowChecks(
       // construct.
       for (auto pred : *block->predecessors()) {
         if (pred->structurally_reachable() && !construct_blocks.count(pred)) {
-          return _.diag(SPV_ERROR_INVALID_CFG, _.FindDef(pred->id()))
+          return _.diag(SPV_ERROR_INVALID_CFG, { _.FindDef(pred->id()), _.FindDef(header->id()) })
                  << "block <ID> " << pred->id() << " branches to the "
                  << construct_name << " construct, but not to the "
                  << header_name << " <ID> " << header->id();
@@ -819,7 +819,7 @@ spv_result_t StructuredControlFlowChecks(
           auto merge_block = function->GetBlock(merge_id).first;
           if (merge_block->structurally_reachable() &&
               !construct_blocks.count(merge_block)) {
-            return _.diag(SPV_ERROR_INVALID_CFG, _.FindDef(block->id()))
+            return _.diag(SPV_ERROR_INVALID_CFG, { _.FindDef(block->id()), _.FindDef(header->id()), _.FindDef(merge_id) })
                    << "Header block " << _.getIdName(block->id())
                    << " is contained in the " << construct_name
                    << " construct headed by " << _.getIdName(header->id())
@@ -859,7 +859,8 @@ spv_result_t StructuredControlFlowChecks(
               is_back_edge = true;
           }
           if (!construct_blocks.count(pred) && !is_back_edge) {
-            return _.diag(SPV_ERROR_INVALID_CFG, pred->terminator())
+            return _.diag(SPV_ERROR_INVALID_CFG, { pred->terminator(), _.FindDef(pred->id()),
+                                                   _.FindDef(continue_id), _.FindDef(header->id()) })
                    << "Block " << _.getIdName(pred->id())
                    << " branches to the loop continue target "
                    << _.getIdName(continue_id)
