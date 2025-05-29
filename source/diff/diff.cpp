@@ -2807,7 +2807,7 @@ spv_result_t Differ::Output() {
 
   NameMapper name_mapper = GetTrivialNameMapper();
   disassemble::InstructionDisassembler dis(out_, disassembly_options,
-                                           name_mapper);
+                                           name_mapper, 0u);
 
   if (!options_.no_header) {
     // Output the header

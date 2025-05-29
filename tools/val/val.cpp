@@ -23,6 +23,7 @@
 #include "spirv-tools/libspirv.hpp"
 #include "tools/io.h"
 #include "tools/util/cli_consumer.h"
+#include "source/spirv_container.h"
 
 void print_usage(char* argv0) {
   std::string target_env_list = spvTargetEnvList(36, 105);
@@ -203,11 +204,22 @@ int main(int argc, char** argv) {
 
   std::vector<uint32_t> contents;
   if (!ReadBinaryFile(inFile, &contents)) return 1;
+  spirv_container container { std::move(contents) };
+  if (!container.is_valid()) {
+    // neither a valid SPIR-V file, nor a valid container
+    return 1;
+  }
 
-  spvtools::SpirvTools tools(target_env);
-  tools.SetMessageConsumer(spvtools::utils::CLIMessageConsumer);
+  bool succeed = true;
+  for (const auto& module : container) {
+    spvtools::SpirvTools tools(target_env);
+    tools.SetMessageConsumer([&module](spv_message_level_t level, const char* source, const spv_position_t& position, const char* message) {
+      std::cerr << "in module " << (!module.functions.empty() ? module.functions[0].second : "<unknown>") << ": source " << (source ? source : "<unknown>") << ":" << std::endl;
+      spvtools::utils::CLIMessageConsumer(level, source, position, message);
+    });
 
-  bool succeed = tools.Validate(contents.data(), contents.size(), options);
+    succeed &= tools.Validate(module.data, module.size, options);
+  }
 
   return !succeed;
 }

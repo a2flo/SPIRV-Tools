@@ -192,6 +192,7 @@ class ValidationState_t {
   bool IsOpcodeInCurrentLayoutSection(spv::Op op);
 
   DiagnosticStream diag(spv_result_t error_code, const Instruction* inst);
+  DiagnosticStream diag(spv_result_t error_code, std::vector<const Instruction*> insts);
 
   /// Returns the function states
   std::vector<Function>& functions();
