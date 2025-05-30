@@ -64,7 +64,6 @@ add_custom_command(OUTPUT ${CORE_TABLES_BODY_INC_FILE} ${CORE_TABLES_HEADER_INC_
 	    ${EI_ns_clspvreflect}
 	    ${EI_ns_vkspreflect}
     COMMENT "Generate grammar tables")
-add_custom_target(spirv-tools-tables DEPENDS ${CORE_TABLES_BODY_INC_FILE} ${CORE_TABLES_HEADER_INC_FILE})
 
 macro(spvtools_vimsyntax CONFIG_VERSION CLVERSION)
   set(GRAMMAR_JSON_FILE "${SPIRV_HEADER_INCLUDE_DIR}/spirv/${CONFIG_VERSION}/spirv.core.grammar.json")
@@ -126,6 +125,8 @@ add_custom_target(core_tables
 		${CORE_TABLES_HEADER_INC_FILE})
 add_custom_target(extinst_tables
   DEPENDS ${EXTINST_CPP_DEPENDS})
+
+add_custom_target(spirv-tools-tables DEPENDS core_tables ${CORE_TABLES_HEADER_INC_FILE})
 
 set_source_files_properties(
   ${CMAKE_CURRENT_SOURCE_DIR}/extensions.h
