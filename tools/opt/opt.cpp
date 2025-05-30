@@ -869,17 +869,18 @@ int main(int argc, const char** argv) {
 
   spv_target_env target_env = kDefaultEnvironment;
 
-  spvtools::Optimizer optimizer(target_env);
-  optimizer.SetMessageConsumer(spvtools::utils::CLIMessageConsumer);
+  // only dummy init here, see reasoning further below
+  spvtools::Optimizer dummy_optimizer(target_env);
+  dummy_optimizer.SetMessageConsumer(spvtools::utils::CLIMessageConsumer);
 
-  spvtools::ValidatorOptions validator_options;
-  spvtools::OptimizerOptions optimizer_options;
-  OptStatus status = ParseFlags(argc, argv, &optimizer, &in_file, &out_file,
-                                &validator_options, &optimizer_options);
-  optimizer_options.set_validator_options(validator_options);
+  spvtools::ValidatorOptions dummy_validator_options;
+  spvtools::OptimizerOptions dummy_optimizer_options;
+  OptStatus init_status = ParseFlags(argc, argv, &dummy_optimizer, &in_file, &out_file,
+                                     &dummy_validator_options, &dummy_optimizer_options);
+  dummy_optimizer_options.set_validator_options(dummy_validator_options);
 
-  if (status.action == OPT_STOP) {
-    return status.code;
+  if (init_status.action == OPT_STOP) {
+    return init_status.code;
   }
 
   if (out_file == nullptr) {
@@ -900,6 +901,21 @@ int main(int argc, const char** argv) {
   std::vector<std::vector<uint32_t>> optimized_bins;
   std::vector<spirv_container::module_t> optimized_modules;
   for (auto& mod : container) {
+    // NOTE: we have to create a new optimizer object for every module we want to run through here,
+    //       because internal optimizer state changes so that additional runs are not possible
+    in_file = nullptr;
+    out_file = nullptr;
+    spvtools::Optimizer optimizer(target_env);
+    optimizer.SetMessageConsumer(spvtools::utils::CLIMessageConsumer);
+    spvtools::ValidatorOptions validator_options;
+    spvtools::OptimizerOptions optimizer_options;
+    OptStatus status = ParseFlags(argc, argv, &optimizer, &in_file, &out_file,
+                                  &validator_options, &optimizer_options);
+    if (status.action == OPT_STOP) {
+      return status.code;
+    }
+    optimizer_options.set_validator_options(validator_options);
+
     std::vector<uint32_t> optimized_bin;
     optimized_bin.reserve(mod.size);
     // abort immediately if opt failed
