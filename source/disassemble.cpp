@@ -840,7 +840,7 @@ void InstructionDisassembler::EmitInstructionImpl(
             last_dbg_line.line != inst.words[2] ||
             last_dbg_line.column != inst.words[3]) {
           last_dbg_line.set(file_id, inst.words[2], inst.words[3]);
-          file_iter->second.print_line(line, inst.words[2], inst.words[3]);
+          file_iter->second.print_line(stream_, inst.words[2], inst.words[3]);
         }
         return;
       }
